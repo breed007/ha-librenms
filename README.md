@@ -49,12 +49,14 @@ Setup is a URL and an API token — no YAML.
 
 ### Supported LibreNMS versions
 
-Developed and tested against LibreNMS **25.x**. The three endpoints this
-integration uses — `/api/v0/system`, `/api/v0/devices` and `/api/v0/alerts` —
-have been stable across the lifetime of the v0 API, so older releases will
-very likely work. A hard minimum version has not been pinned yet; if you hit a
-problem on an older release, please open an issue with your version so it can
-be documented.
+Verified against LibreNMS **26.8** on a 22-device install. The three endpoints
+this integration uses — `/api/v0/system`, `/api/v0/devices` and
+`/api/v0/alerts` — have been stable across the lifetime of the v0 API, so
+older releases will very likely work.
+
+A hard minimum version has not been pinned. If you hit a problem on an older
+release, please open an issue with your LibreNMS version so it can be
+documented — that is the most useful thing an early user can report.
 
 ---
 
