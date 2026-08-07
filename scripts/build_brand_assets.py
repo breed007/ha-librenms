@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Build the home-assistant/brands image set from LibreNMS's official logos.
+"""Build the integration's brand image set from LibreNMS's official logos.
 
-The Home Assistant brands repository expects a specific set of PNGs per
-integration domain. This renders them from the SVGs LibreNMS publishes, so the
-integration shows LibreNMS's own mark rather than something invented for it.
+Since Home Assistant 2026.3 a custom integration ships its own brand images in
+a ``brand/`` directory, and those take priority over the brands CDN. No pull
+request against home-assistant/brands is needed -- that repository no longer
+accepts icons for custom integrations.
 
-Source artwork is downloaded from the LibreNMS repository at run time and is
-not vendored here; re-run this script to pick up upstream changes.
+The PNGs are rendered from the SVGs LibreNMS publishes, so the integration
+shows LibreNMS's own mark rather than something invented for it. Source artwork
+is downloaded at run time and is not vendored here; re-run this script to pick
+up upstream changes.
 
 Usage::
 
@@ -14,8 +17,8 @@ Usage::
     .toolvenv/bin/pip install resvg-py pillow pyoxipng
     .toolvenv/bin/python scripts/build_brand_assets.py
 
-Output lands in ``brands/custom_integrations/librenms/``, mirroring the layout
-of the brands repository so the directory can be copied across verbatim.
+Output lands in ``custom_components/librenms/brand/``, which is where Home
+Assistant looks for it.
 """
 
 from __future__ import annotations
@@ -69,6 +72,7 @@ class Target:
 
 # Icons must be exactly square: 256 and 512. Logos keep the brand's aspect
 # ratio, with the shortest side in 128-256 (standard) and 256-512 (@2x).
+# Home Assistant recognises exactly these eight filenames.
 TARGETS: tuple[Target, ...] = (
     Target("icon.png", ICON_LIGHT_BG, 256, True),
     Target("icon@2x.png", ICON_LIGHT_BG, 512, True),
@@ -144,7 +148,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("brands/custom_integrations/librenms"),
+        default=Path("custom_components/librenms/brand"),
         help="directory to write the PNG set into",
     )
     parser.add_argument(

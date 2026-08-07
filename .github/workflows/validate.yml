@@ -35,6 +35,7 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # No brands PR yet; drop this once the domain is in
-          # home-assistant/brands.
+          # This check wants the domain in home-assistant/brands, but that
+          # repository no longer accepts icons for custom integrations. The
+          # icon ships in custom_components/librenms/brand/ instead.
           ignore: brands

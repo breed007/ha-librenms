@@ -321,10 +321,40 @@ python3 -m venv .venv
 The test suite mocks the LibreNMS API with sanitized fixtures under
 `tests/fixtures/`; no live instance is needed.
 
-Integration artwork is not stored in the component — Home Assistant reads it
-from the [`home-assistant/brands`](https://github.com/home-assistant/brands)
-repository. The PNG set is staged in [`brands/`](brands/README.md) and rebuilt
-from LibreNMS's official SVGs with `scripts/build_brand_assets.py`.
+### Branding
+
+The integration ships its own icon in `custom_components/librenms/brand/`.
+Since [Home Assistant 2026.3](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api)
+a custom integration provides brand images itself and they take priority over
+the brands CDN — no pull request against `home-assistant/brands` is involved,
+and that repository no longer accepts icons for custom integrations. On Home
+Assistant older than 2026.3 the directory is simply ignored and the default
+placeholder is shown.
+
+**The artwork is LibreNMS's, not this project's.** All eight PNGs are rendered
+from the SVGs LibreNMS publishes in
+[`librenms/librenms`](https://github.com/librenms/librenms/tree/master/html/images),
+so the integration carries their real mark:
+
+| Output | Rendered from |
+|---|---|
+| `icon.png`, `icon@2x.png` | `librenms_logo_only_light.svg` |
+| `dark_icon.png`, `dark_icon@2x.png` | `librenms_logo_only_dark.svg` |
+| `logo.png`, `logo@2x.png` | `librenms_logo_light.svg` |
+| `dark_logo.png`, `dark_logo@2x.png` | `librenms_logo_dark.svg` |
+
+Note the light/dark naming inverts between the two projects: LibreNMS names a
+file for the background it sits on, Home Assistant for the artwork itself. So
+HA's `logo.png` comes from LibreNMS's `_light` file.
+
+Rebuild after an upstream artwork change — sources are downloaded at build
+time rather than vendored:
+
+```bash
+python3 -m venv /tmp/brandtools
+/tmp/brandtools/bin/pip install resvg-py pillow pyoxipng
+/tmp/brandtools/bin/python scripts/build_brand_assets.py
+```
 
 ---
 
