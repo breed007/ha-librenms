@@ -55,12 +55,12 @@ class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
             identifiers={(DOMAIN, f"{entry_id}_{device_id}")},
             via_device=(DOMAIN, entry_id),
             name=device.name,
-            # LibreNMS has no true vendor field. `hardware` is a model
-            # designation ("U7-Pro-XG", "DS923+") and is often empty, while
-            # `os` ("unifi", "dsm") is the closest thing to a vendor and is
-            # always set -- so `os` goes in the manufacturer slot. Mapping
-            # these the other way round renders as "unifi by U7-Pro-XG".
-            manufacturer=device.os,
+            # `hardware` is the model ("U7-Pro-XG", "DS923+") -- LibreNMS
+            # calls it Platform. The vendor comes from the device icon, which
+            # is what LibreNMS shows in its own Vendor column and correctly
+            # attributes drivers that share a manufacturer. `os` is only a
+            # fallback for devices with no icon.
+            manufacturer=device.vendor or device.os,
             model=device.hardware,
             sw_version=device.version,
             serial_number=device.serial,

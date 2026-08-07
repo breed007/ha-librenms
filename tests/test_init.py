@@ -60,10 +60,11 @@ async def test_hub_and_devices_registered(
         identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
     )
     assert device is not None
+    # `display` merely repeats the hostname here, so sysName wins.
     assert device.name == "core-sw01"
-    # LibreNMS `hardware` is the model and `os` is the nearest thing to a
-    # vendor, so they map to model and manufacturer respectively.
-    assert device.manufacturer == "edgeswitch"
+    # The vendor comes from the icon, not the os driver: this device runs the
+    # legacy `edgeswitch` driver but is Ubiquiti hardware.
+    assert device.manufacturer == "Ubiquiti"
     assert device.model == "Ubiquiti EdgeSwitch 24"
     assert device.sw_version == "1.9.3"
     assert device.via_device_id == hub.id
@@ -83,22 +84,21 @@ async def test_device_without_hardware_still_has_a_manufacturer(
     mock_librenms: MockLibreNMS,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """`hardware` is frequently empty; `os` is not, so it carries the vendor.
+    """`hardware` is frequently empty, but the icon still names a vendor.
 
-    On a real homelab 8 of 22 devices reported no hardware string at all,
-    which is why the always-populated field is the one in the manufacturer
-    slot.
+    On a real homelab 8 of 22 devices reported no hardware string at all.
     """
     mock_librenms.set_devices(
         [
             {
                 "device_id": 1,
-                "hostname": "vm-01.lan.example",
-                "sysName": "vm-01",
+                "hostname": "192.168.10.40",
+                "sysName": "navigator",
+                "display": "192.168.10.40",
                 "status": 1,
-                "os": "proxmox",
-                "hardware": "",
-                "version": "8.2.2",
+                "os": "linux",
+                "hardware": None,
+                "icon": "linux.svg",
             }
         ]
     )
@@ -108,8 +108,83 @@ async def test_device_without_hardware_still_has_a_manufacturer(
         identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
     )
     assert device is not None
-    assert device.manufacturer == "proxmox"
+    assert device.manufacturer == "Linux"
     assert device.model is None
+    assert device.name == "navigator"
+
+
+async def test_device_name_prefers_sysname_over_a_mirrored_display(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A fleet added by IP must not end up named after its addresses.
+
+    LibreNMS computes `display` from a global template that defaults to the
+    hostname, so it is always populated and usually identical to it. A real
+    override still wins.
+    """
+    mock_librenms.set_devices(
+        [
+            # display mirrors hostname -> sysName should win
+            {
+                "device_id": 1,
+                "hostname": "192.168.10.1",
+                "sysName": "utopia",
+                "display": "192.168.10.1",
+                "status": 1,
+                "icon": "linux.svg",
+            },
+            # a genuine display override -> it wins over sysName
+            {
+                "device_id": 2,
+                "hostname": "192.168.10.10",
+                "sysName": "star",
+                "display": "Core Switch",
+                "status": 1,
+                "icon": "ubiquiti.svg",
+            },
+            # nothing but a hostname -> fall all the way back
+            {
+                "device_id": 3,
+                "hostname": "192.168.10.99",
+                "status": 1,
+                "icon": "ubiquiti.svg",
+            },
+        ]
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    registry = dr.async_get(hass)
+    names = {
+        i: registry.async_get_device(
+            identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_{i}")}
+        ).name
+        for i in (1, 2, 3)
+    }
+    assert names == {1: "utopia", 2: "Core Switch", 3: "192.168.10.99"}
+
+
+@pytest.mark.parametrize(
+    ("icon", "expected"),
+    [
+        # The legacy EdgeSwitch driver is still Ubiquiti hardware, and the
+        # icon is what makes that visible.
+        ("ubiquiti.svg", "Ubiquiti"),
+        ("synology.svg", "Synology"),
+        ("apple.svg", "Apple"),
+        ("proxmox.svg", "Proxmox"),
+        ("images/os/brother.png", "Brother"),
+        ("aruba-instant.svg", "Aruba Instant"),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_vendor_from_icon(icon: str | None, expected: str | None) -> None:
+    """The icon filename is the API's closest thing to a manufacturer."""
+    from custom_components.librenms.coordinator import _vendor_from_icon
+
+    assert _vendor_from_icon(icon) == expected
 
 
 async def test_auth_failure_triggers_reauth(

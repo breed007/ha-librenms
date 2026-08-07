@@ -6,7 +6,7 @@
       "device_id": 1,
       "hostname": "core-sw01.lan.example",
       "sysName": "core-sw01",
-      "display": null,
+      "display": "core-sw01.lan.example",
       "status": 1,
       "status_reason": "",
       "uptime": 4321000,
@@ -18,7 +18,8 @@
       "last_polled": "2025-07-28 09:14:03",
       "disabled": 0,
       "ignore": 0,
-      "type": "network"
+      "type": "network",
+      "icon": "ubiquiti.svg"
     },
     {
       "device_id": "2",
@@ -36,7 +37,8 @@
       "last_polled": "2025-07-28 09:13:48",
       "disabled": "0",
       "ignore": "0",
-      "type": "wireless"
+      "type": "wireless",
+      "icon": "ubiquiti.svg"
     },
     {
       "device_id": 3,
@@ -53,7 +55,9 @@
       "last_polled": "2025-06-01 00:00:00",
       "disabled": 1,
       "ignore": 0,
-      "type": "storage"
+      "type": "storage",
+      "display": "old-nas.lan.example",
+      "icon": "synology.svg"
     },
     {
       "device_id": 4,
@@ -70,7 +74,9 @@
       "last_polled": "2025-07-28 09:14:01",
       "disabled": 0,
       "ignore": 1,
-      "type": "network"
+      "type": "network",
+      "display": "lab-router.lan.example",
+      "icon": "mikrotik.svg"
     }
   ]
 }

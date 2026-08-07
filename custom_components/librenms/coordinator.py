@@ -70,6 +70,22 @@ def _as_str(value: Any) -> str | None:
     return text or None
 
 
+def _vendor_from_icon(value: Any) -> str | None:
+    """Derive a vendor name from LibreNMS's device icon filename.
+
+    The icon is the closest thing the API exposes to a manufacturer, and it is
+    what LibreNMS renders in its own Vendor column. Crucially it groups drivers
+    that share a vendor: `unifi`, `unifi-usp` and the legacy `edgeswitch` all
+    resolve to `ubiquiti.svg`, so switches running the old EdgeSwitch MIB are
+    still attributed to Ubiquiti.
+    """
+    icon = _as_str(value)
+    if icon is None:
+        return None
+    stem = icon.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return _as_str(stem.replace("-", " ").replace("_", " ").title())
+
+
 @dataclass(slots=True)
 class LibreNMSDevice:
     """A single device as reported by LibreNMS."""
@@ -82,6 +98,7 @@ class LibreNMSDevice:
     uptime: int | None
     hardware: str | None
     os: str | None
+    vendor: str | None
     version: str | None
     serial: str | None
     location: str | None
@@ -103,9 +120,14 @@ class LibreNMSDevice:
             return None
 
         hostname = _as_str(payload.get("hostname")) or f"device-{device_id}"
-        # LibreNMS shows `display` if set, then sysName, then hostname.
+        # `display` is computed from a global LibreNMS template that defaults
+        # to the hostname, so it is never empty and usually just repeats it.
+        # Treat it as a real override only when it actually differs, otherwise
+        # a fleet added by IP ends up with every device named after its
+        # address instead of its sysName.
+        display = _as_str(payload.get("display"))
         name = (
-            _as_str(payload.get("display"))
+            (display if display != hostname else None)
             or _as_str(payload.get("sysName"))
             or hostname
         )
@@ -119,6 +141,7 @@ class LibreNMSDevice:
             uptime=_as_int(payload.get("uptime")),
             hardware=_as_str(payload.get("hardware")),
             os=_as_str(payload.get("os")),
+            vendor=_vendor_from_icon(payload.get("icon")),
             version=_as_str(payload.get("version")),
             serial=_as_str(payload.get("serial")),
             location=_as_str(payload.get("location")),
