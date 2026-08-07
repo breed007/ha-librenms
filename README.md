@@ -321,6 +321,11 @@ python3 -m venv .venv
 The test suite mocks the LibreNMS API with sanitized fixtures under
 `tests/fixtures/`; no live instance is needed.
 
+Integration artwork is not stored in the component — Home Assistant reads it
+from the [`home-assistant/brands`](https://github.com/home-assistant/brands)
+repository. The PNG set is staged in [`brands/`](brands/README.md) and rebuilt
+from LibreNMS's official SVGs with `scripts/build_brand_assets.py`.
+
 ---
 
 ## License
