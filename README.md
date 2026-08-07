@@ -1,7 +1,7 @@
 # LibreNMS for Home Assistant
 
-[![Tests](https://github.com/breed/ha-librenms/actions/workflows/tests.yml/badge.svg)](https://github.com/breed/ha-librenms/actions/workflows/tests.yml)
-[![Validate](https://github.com/breed/ha-librenms/actions/workflows/validate.yml/badge.svg)](https://github.com/breed/ha-librenms/actions/workflows/validate.yml)
+[![Tests](https://github.com/breed007/ha-librenms/actions/workflows/tests.yml/badge.svg)](https://github.com/breed007/ha-librenms/actions/workflows/tests.yml)
+[![Validate](https://github.com/breed007/ha-librenms/actions/workflows/validate.yml/badge.svg)](https://github.com/breed007/ha-librenms/actions/workflows/validate.yml)
 [![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
 
 See your entire monitored network — device up/down, active alerts, health
@@ -12,6 +12,9 @@ API](https://docs.librenms.org/API/). It polls your instance and turns every
 monitored device into a Home Assistant device, with instance-wide summary
 sensors for dashboards and an event entity for alert-driven automations. It
 does not modify anything in LibreNMS.
+
+A community project. Not affiliated with, endorsed by, or supported by the
+LibreNMS project.
 
 ---
 
@@ -50,7 +53,7 @@ be documented.
 
 1. In Home Assistant, go to **HACS → Integrations**.
 2. Open the ⋮ menu → **Custom repositories**.
-3. Add `https://github.com/breed/ha-librenms` with category **Integration**.
+3. Add `https://github.com/breed007/ha-librenms` with category **Integration**.
 4. Find **LibreNMS** in the list, install it, and restart Home Assistant.
 
 ### Manual
