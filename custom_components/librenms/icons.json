@@ -1,0 +1,61 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "problem": {
+        "default": "mdi:alert-circle-check",
+        "state": {
+          "on": "mdi:alert-circle"
+        }
+      },
+      "status": {
+        "default": "mdi:lan-disconnect",
+        "state": {
+          "on": "mdi:lan-connect"
+        }
+      }
+    },
+    "event": {
+      "alerts": {
+        "default": "mdi:bell-alert"
+      }
+    },
+    "sensor": {
+      "active_alerts": {
+        "default": "mdi:bell-ring"
+      },
+      "alert_count": {
+        "default": "mdi:bell-ring"
+      },
+      "alerts_critical": {
+        "default": "mdi:alert-octagon"
+      },
+      "alerts_warning": {
+        "default": "mdi:alert"
+      },
+      "devices_down": {
+        "default": "mdi:server-off"
+      },
+      "devices_excluded": {
+        "default": "mdi:server-minus"
+      },
+      "devices_total": {
+        "default": "mdi:server-network"
+      },
+      "devices_up": {
+        "default": "mdi:server-network"
+      },
+      "hardware": {
+        "default": "mdi:chip"
+      },
+      "last_polled": {
+        "default": "mdi:clock-check-outline"
+      },
+      "os": {
+        "default": "mdi:memory"
+      },
+      "uptime": {
+        "default": "mdi:clock-start"
+      }
+    }
+  }
+}

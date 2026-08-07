@@ -1,0 +1,97 @@
+"""Binary sensor platform for the LibreNMS integration."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+from .coordinator import LibreNMSConfigEntry, LibreNMSDataUpdateCoordinator
+from .entity import LibreNMSDeviceEntity, LibreNMSEntity, async_setup_device_entities
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: LibreNMSConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up LibreNMS binary sensors."""
+    coordinator = entry.runtime_data
+
+    async_add_entities([LibreNMSProblemBinarySensor(coordinator)])
+
+    async_setup_device_entities(
+        coordinator,
+        async_add_entities,
+        lambda device_id: [LibreNMSDeviceStatusBinarySensor(coordinator, device_id)],
+    )
+
+
+class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
+    """On when any monitored device is down or any critical alert is active."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = "problem"
+
+    def __init__(self, coordinator: LibreNMSDataUpdateCoordinator) -> None:
+        """Initialise the binary sensor."""
+        super().__init__(coordinator, "problem")
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if something needs attention."""
+        return self.coordinator.data.has_problem
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return a breakdown of what is currently wrong."""
+        data = self.coordinator.data
+        return {
+            "devices_down": data.devices_down,
+            "alerts_critical": data.alerts_critical,
+            "alerts_warning": data.alerts_warning,
+            "down_hostnames": sorted(
+                device.hostname
+                for device in data.devices.values()
+                if not device.up
+                and (self.coordinator.include_disabled or not device.excluded)
+            ),
+        }
+
+
+class LibreNMSDeviceStatusBinarySensor(LibreNMSDeviceEntity, BinarySensorEntity):
+    """Up/down state of a single monitored device."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = "status"
+
+    def __init__(
+        self, coordinator: LibreNMSDataUpdateCoordinator, device_id: int
+    ) -> None:
+        """Initialise the binary sensor."""
+        super().__init__(coordinator, device_id, "status")
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True when LibreNMS considers the device up."""
+        if (device := self.device) is None:
+            return None
+        return device.up
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return why LibreNMS marked the device down, plus its flags."""
+        if (device := self.device) is None:
+            return None
+        return {
+            "status_reason": device.status_reason,
+            "hostname": device.hostname,
+            "location": device.location,
+            "disabled": device.disabled,
+            "ignored": device.ignored,
+        }

@@ -1,0 +1,115 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to LibreNMS",
+        "description": "Enter the URL of your LibreNMS instance and an API token. Create the token in LibreNMS under Settings → API → API Access. A dedicated read-only user is recommended.",
+        "data": {
+          "url": "URL",
+          "api_token": "API token",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "url": "For example https://librenms.example.com. Subpaths are supported; leave off /api/v0.",
+          "api_token": "The token value shown in LibreNMS API Access.",
+          "verify_ssl": "Turn this off only if your instance uses a self-signed certificate."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate LibreNMS",
+        "description": "The API token for {url} was rejected. Enter a new token.",
+        "data": {
+          "api_token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the URL, that the instance is reachable from Home Assistant, and the SSL setting.",
+      "invalid_auth": "Invalid API token.",
+      "invalid_url": "That does not look like a valid URL.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This LibreNMS instance is already configured.",
+      "reauth_successful": "Reauthentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "LibreNMS options",
+        "data": {
+          "scan_interval": "Update interval",
+          "include_disabled": "Count disabled and ignored devices"
+        },
+        "data_description": {
+          "scan_interval": "How often to poll LibreNMS, in seconds. Lower values detect outages faster but put more load on the instance.",
+          "include_disabled": "When enabled, devices marked disabled or ignored in LibreNMS are included in the device totals and the up/down counts."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      },
+      "status": {
+        "name": "Status"
+      }
+    },
+    "event": {
+      "alerts": {
+        "name": "Alerts",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "critical": "Critical",
+              "warning": "Warning",
+              "ok": "OK",
+              "recovered": "Recovered"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "active_alerts": {
+        "name": "Active alerts"
+      },
+      "alert_count": {
+        "name": "Active alerts"
+      },
+      "alerts_critical": {
+        "name": "Critical alerts"
+      },
+      "alerts_warning": {
+        "name": "Warning alerts"
+      },
+      "devices_down": {
+        "name": "Devices down"
+      },
+      "devices_excluded": {
+        "name": "Devices excluded"
+      },
+      "devices_total": {
+        "name": "Devices"
+      },
+      "devices_up": {
+        "name": "Devices up"
+      },
+      "hardware": {
+        "name": "Hardware"
+      },
+      "last_polled": {
+        "name": "Last polled"
+      },
+      "os": {
+        "name": "Operating system"
+      },
+      "uptime": {
+        "name": "Last boot"
+      }
+    }
+  }
+}

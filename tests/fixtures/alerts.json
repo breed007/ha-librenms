@@ -1,0 +1,37 @@
+{
+  "status": "ok",
+  "message": "",
+  "count": 2,
+  "alerts": [
+    {
+      "id": "101",
+      "device_id": "2",
+      "hostname": "ap-garage.lan.example",
+      "rule_id": "7",
+      "name": "Device down due to no ICMP response",
+      "severity": "critical",
+      "state": "1",
+      "alerted": "1",
+      "open": "1",
+      "note": "",
+      "timestamp": "2025-07-28 09:12:00",
+      "proc": null,
+      "notes": ""
+    },
+    {
+      "id": "102",
+      "device_id": "1",
+      "hostname": "core-sw01.lan.example",
+      "rule_id": "12",
+      "name": "Port utilisation over 80%",
+      "severity": "warning",
+      "state": "1",
+      "alerted": "1",
+      "open": "1",
+      "note": "",
+      "timestamp": "2025-07-28 08:55:00",
+      "proc": null,
+      "notes": ""
+    }
+  ]
+}

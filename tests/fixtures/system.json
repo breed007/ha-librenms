@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "system": [
+    {
+      "local_ver": "25.7.0",
+      "local_sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "local_date": "2025-07-28T09:14:03+00:00",
+      "local_branch": "master",
+      "db_schema": "2025_06_11_000000_example",
+      "php_ver": "8.3.10",
+      "database_ver": "10.11.6-MariaDB",
+      "rrdtool_ver": "1.8.0",
+      "netsnmp_ver": "5.9.4"
+    }
+  ],
+  "count": 1
+}
