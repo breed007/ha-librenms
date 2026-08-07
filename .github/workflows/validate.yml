@@ -22,20 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # HACS reads file contents over unauthenticated raw.githubusercontent.com,
-    # which 404s while this repository is private, so the hacsjson and
-    # integration_manifest checks cannot pass yet. Its metadata checks (topics,
-    # description, license, issues, archived) do run and must stay green.
-    #
-    # REMOVE THIS once the repository is public -- at that point the remaining
-    # two checks are meaningful and should block again.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: hacs/action@main
         with:
           category: integration
-          # This check wants the domain in home-assistant/brands, but that
-          # repository no longer accepts icons for custom integrations. The
-          # icon ships in custom_components/librenms/brand/ instead.
-          ignore: brands
