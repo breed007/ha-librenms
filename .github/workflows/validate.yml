@@ -14,17 +14,24 @@ jobs:
     name: hassfest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
     name: HACS
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: hacs/action@main
         with:
           category: integration
           # No brands PR yet; drop this once the domain is in
           # home-assistant/brands.
           ignore: brands
+        env:
+          # HACS reads hacs.json and the integration manifest back through the
+          # GitHub API rather than from the checkout, so a private repository
+          # needs a token or those files come back empty.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

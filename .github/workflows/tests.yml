@@ -16,11 +16,11 @@ jobs:
     name: Ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.DEFAULT_PYTHON }}
-      - run: python -m pip install --upgrade pip ruff
+      - run: python -m pip install --upgrade pip "ruff==0.16.2"
       - run: ruff check .
       - run: ruff format --check .
 
@@ -39,8 +39,8 @@ jobs:
           - homeassistant: "2026.7.4"
             phcc: "0.13.348"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.DEFAULT_PYTHON }}
       - name: Install dependencies

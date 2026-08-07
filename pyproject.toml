@@ -1,5 +1,9 @@
 [tool.ruff]
-target-version = "py314"
+# The integration must stay valid on Python 3.13: hacs.json declares a
+# minimum of Home Assistant 2025.8, which shipped on 3.13. CI runs 3.14 only
+# because pytest-homeassistant-custom-component requires it, which is a test
+# constraint, not a runtime one.
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
