@@ -20,13 +20,24 @@ LibreNMS project.
 
 ## Screenshots
 
-> **TODO before release:** add real screenshots from a live instance.
-> Suggested set, saved under `docs/`:
->
-> - `docs/config-flow.png` — the URL + token setup dialog
-> - `docs/hub-device.png` — the LibreNMS hub device page with summary sensors
-> - `docs/device.png` — a single network device with its status and alert count
-> - `docs/dashboard.png` — an example network dashboard card
+Every device LibreNMS monitors becomes a Home Assistant device, grouped under
+a hub for the instance.
+
+![The LibreNMS integration in Home Assistant, listing monitored devices with their models](docs/integration.png)
+
+The hub holds the instance summary: device counts, active alerts broken down
+by severity, the problem binary sensor, and the alert event entity.
+
+![The LibreNMS hub device page showing summary sensors](docs/hub-device.png)
+
+Each monitored device gets its own page. Model and vendor come from LibreNMS,
+and every device links back to its page there.
+
+![A single monitored device showing its status, alert count and last boot time](docs/device.png)
+
+Setup is a URL and an API token — no YAML.
+
+![Adding the LibreNMS integration from the Home Assistant integrations dashboard](docs/add-integration.png)
 
 ---
 
