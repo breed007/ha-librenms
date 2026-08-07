@@ -61,8 +61,10 @@ async def test_hub_and_devices_registered(
     )
     assert device is not None
     assert device.name == "core-sw01"
-    assert device.manufacturer == "Ubiquiti EdgeSwitch 24"
-    assert device.model == "edgeswitch"
+    # LibreNMS `hardware` is the model and `os` is the nearest thing to a
+    # vendor, so they map to model and manufacturer respectively.
+    assert device.manufacturer == "edgeswitch"
+    assert device.model == "Ubiquiti EdgeSwitch 24"
     assert device.sw_version == "1.9.3"
     assert device.via_device_id == hub.id
     assert device.configuration_url == f"{BASE_URL}/device/device=1/"
@@ -74,6 +76,40 @@ async def test_hub_and_devices_registered(
     )
     assert garage is not None
     assert garage.name == "Garage AP"
+
+
+async def test_device_without_hardware_still_has_a_manufacturer(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """`hardware` is frequently empty; `os` is not, so it carries the vendor.
+
+    On a real homelab 8 of 22 devices reported no hardware string at all,
+    which is why the always-populated field is the one in the manufacturer
+    slot.
+    """
+    mock_librenms.set_devices(
+        [
+            {
+                "device_id": 1,
+                "hostname": "vm-01.lan.example",
+                "sysName": "vm-01",
+                "status": 1,
+                "os": "proxmox",
+                "hardware": "",
+                "version": "8.2.2",
+            }
+        ]
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    device = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
+    )
+    assert device is not None
+    assert device.manufacturer == "proxmox"
+    assert device.model is None
 
 
 async def test_auth_failure_triggers_reauth(

@@ -55,8 +55,13 @@ class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
             identifiers={(DOMAIN, f"{entry_id}_{device_id}")},
             via_device=(DOMAIN, entry_id),
             name=device.name,
-            manufacturer=device.hardware,
-            model=device.os,
+            # LibreNMS has no true vendor field. `hardware` is a model
+            # designation ("U7-Pro-XG", "DS923+") and is often empty, while
+            # `os` ("unifi", "dsm") is the closest thing to a vendor and is
+            # always set -- so `os` goes in the manufacturer slot. Mapping
+            # these the other way round renders as "unifi by U7-Pro-XG".
+            manufacturer=device.os,
+            model=device.hardware,
             sw_version=device.version,
             serial_number=device.serial,
             configuration_url=coordinator.client.device_url(device_id),
