@@ -7,7 +7,9 @@ on:
   workflow_dispatch:
 
 env:
-  DEFAULT_PYTHON: "3.13"
+  # pytest-homeassistant-custom-component requires Python 3.14 from 0.13.317
+  # onwards, which covers every Home Assistant release in the matrix below.
+  DEFAULT_PYTHON: "3.14"
 
 jobs:
   lint:
