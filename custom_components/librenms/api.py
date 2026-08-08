@@ -139,11 +139,22 @@ class LibreNMSClient:
         payload = await self._request("alerts", params={"state": "1"})
         return payload.get("alerts") or []
 
+    async def async_get_sensors(self) -> list[dict[str, Any]]:
+        """Return every health sensor across the whole instance.
+
+        One call covers all devices, so adding health data costs a single
+        extra request per poll rather than one per device.
+        """
+        payload = await self._request("resources/sensors")
+        return payload.get("sensors") or []
+
     async def async_get_overview(
         self,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Fetch devices and alerts concurrently."""
-        devices, alerts = await asyncio.gather(
-            self.async_get_devices(), self.async_get_alerts()
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Fetch devices, alerts and sensors concurrently."""
+        devices, alerts, sensors = await asyncio.gather(
+            self.async_get_devices(),
+            self.async_get_alerts(),
+            self.async_get_sensors(),
         )
-        return devices, alerts
+        return devices, alerts, sensors

@@ -31,8 +31,11 @@ from .const import (
     DOMAIN,
     EVENT_ALERT,
     EVENT_TYPE_RECOVERED,
+    IGNORED_SENSOR_CLASSES,
     LARGE_INSTALL_DEVICE_COUNT,
     POLLER_STALE_AFTER,
+    SENSOR_ABSURD_MAGNITUDE,
+    SENSOR_PLAUSIBLE_RANGE,
     SEVERITY_CRITICAL,
     SEVERITY_OK,
     SEVERITY_WARNING,
@@ -70,6 +73,16 @@ def _as_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce an API value to float, tolerating string forms."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _vendor_from_icon(value: Any) -> str | None:
@@ -205,12 +218,73 @@ class LibreNMSAlert:
 
 
 @dataclass(slots=True)
+class LibreNMSSensor:
+    """One health sensor reading, as LibreNMS reports it."""
+
+    sensor_id: int
+    device_id: int
+    sensor_class: str
+    description: str
+    value: float | None
+    implausible: bool
+    limit_high: float | None
+    limit_low: float | None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any]) -> LibreNMSSensor | None:
+        """Build a sensor, or None if it is unusable or deliberately skipped."""
+        sensor_id = _as_int(payload.get("sensor_id"))
+        device_id = _as_int(payload.get("device_id"))
+        sensor_class = _as_str(payload.get("sensor_class"))
+        if sensor_id is None or device_id is None or sensor_class is None:
+            return None
+
+        # LibreNMS keeps rows for sensors that have gone away.
+        if _as_bool(payload.get("sensor_deleted")):
+            return None
+        if sensor_class in IGNORED_SENSOR_CLASSES:
+            return None
+
+        # `sensor_current` is already scaled. The divisor and multiplier
+        # alongside it describe how the poller derived it and must not be
+        # applied again -- doing so puts every voltage out by 1000x.
+        raw = _as_float(payload.get("sensor_current"))
+        value, implausible = cls._sanity_check(sensor_class, raw)
+
+        return cls(
+            sensor_id=sensor_id,
+            device_id=device_id,
+            sensor_class=sensor_class,
+            description=_as_str(payload.get("sensor_descr")) or f"sensor {sensor_id}",
+            value=value,
+            implausible=implausible,
+            limit_high=_as_float(payload.get("sensor_limit")),
+            limit_low=_as_float(payload.get("sensor_limit_low")),
+        )
+
+    @staticmethod
+    def _sanity_check(
+        sensor_class: str, raw: float | None
+    ) -> tuple[float | None, bool]:
+        """Return the reading, or None when it is obviously not a reading."""
+        if raw is None:
+            return None, False
+        low, high = SENSOR_PLAUSIBLE_RANGE.get(
+            sensor_class, (-SENSOR_ABSURD_MAGNITUDE, SENSOR_ABSURD_MAGNITUDE)
+        )
+        if not low <= raw <= high:
+            return None, True
+        return raw, False
+
+
+@dataclass(slots=True)
 class LibreNMSData:
     """Everything one poll produced."""
 
     devices: dict[int, LibreNMSDevice]
     alerts: list[LibreNMSAlert]
     alerts_by_device: dict[int, list[LibreNMSAlert]]
+    sensors_by_device: dict[int, list[LibreNMSSensor]]
     devices_total: int
     devices_up: int
     devices_down: int
@@ -256,6 +330,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._seen_alerts: dict[int, str] = {}
         self._primed = False
         self._warned_large_install = False
+        self._warned_implausible = False
 
         # Newest `last_polled` seen across the fleet, and when it last moved.
         # Detecting that this stops advancing is what catches a stuck poller;
@@ -292,7 +367,11 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
     async def _async_update_data(self) -> LibreNMSData:
         """Fetch devices and alerts, and derive counts and alert deltas."""
         try:
-            raw_devices, raw_alerts = await self.client.async_get_overview()
+            (
+                raw_devices,
+                raw_alerts,
+                raw_sensors,
+            ) = await self.client.async_get_overview()
         except LibreNMSAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except LibreNMSError as err:
@@ -322,6 +401,23 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             if alert.device_id is not None:
                 alerts_by_device.setdefault(alert.device_id, []).append(alert)
 
+        sensors_by_device: dict[int, list[LibreNMSSensor]] = {}
+        implausible = 0
+        for payload in raw_sensors:
+            sensor = LibreNMSSensor.from_api(payload)
+            if sensor is None:
+                continue
+            implausible += sensor.implausible
+            sensors_by_device.setdefault(sensor.device_id, []).append(sensor)
+
+        if implausible and not self._warned_implausible:
+            self._warned_implausible = True
+            _LOGGER.warning(
+                "%s LibreNMS sensor(s) reported readings outside any plausible "
+                "range and are shown as unavailable rather than as real values",
+                implausible,
+            )
+
         counted = [
             device
             for device in devices.values()
@@ -333,6 +429,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             devices=devices,
             alerts=alerts,
             alerts_by_device=alerts_by_device,
+            sensors_by_device=sensors_by_device,
             devices_total=len(counted),
             devices_up=devices_up,
             devices_down=len(counted) - devices_up,

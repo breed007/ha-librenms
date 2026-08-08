@@ -1,0 +1,135 @@
+"""Tests for LibreNMS health sensors."""
+
+from __future__ import annotations
+
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.librenms.coordinator import LibreNMSSensor
+
+from .conftest import MockLibreNMS, setup_integration
+
+
+def test_scaling_is_not_reapplied() -> None:
+    """`sensor_current` is already scaled; divisor/multiplier are history.
+
+    A real instance reports 3.299 V with divisor 1000. Dividing again would
+    publish 0.0033 V, which looks plausible enough to go unnoticed.
+    """
+    sensor = LibreNMSSensor.from_api(
+        {
+            "sensor_id": 1,
+            "device_id": 1,
+            "sensor_class": "voltage",
+            "sensor_current": 3.299,
+            "sensor_divisor": 1000,
+            "sensor_multiplier": 1,
+        }
+    )
+    assert sensor is not None
+    assert sensor.value == 3.299
+
+
+def test_sentinel_readings_are_rejected() -> None:
+    """Hardware with no reading returns a 32-bit sentinel, not nothing."""
+    sensor = LibreNMSSensor.from_api(
+        {
+            "sensor_id": 1,
+            "device_id": 1,
+            "sensor_class": "temperature",
+            "sensor_current": 4294704.096,
+            "sensor_limit": 58,
+        }
+    )
+    assert sensor is not None
+    assert sensor.value is None
+    assert sensor.implausible is True
+
+
+def test_deleted_and_enum_sensors_are_skipped() -> None:
+    """Retired rows and untranslatable state enums are not published."""
+    base = {"sensor_id": 1, "device_id": 1, "sensor_current": 1}
+    assert (
+        LibreNMSSensor.from_api(
+            {**base, "sensor_class": "temperature", "sensor_deleted": 1}
+        )
+        is None
+    )
+    assert LibreNMSSensor.from_api({**base, "sensor_class": "state"}) is None
+
+
+async def test_health_sensors_are_created(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Temperature is enabled; other classes are registered but off."""
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+
+    temp = hass.states.get("sensor.core_sw01_system")
+    assert temp is not None
+    assert temp.state == "45.0"
+    assert temp.attributes["device_class"] == SensorDeviceClass.TEMPERATURE
+    assert temp.attributes["unit_of_measurement"] == "°C"
+    assert temp.attributes["limit_high"] == 60.0
+    assert temp.attributes["limit_low"] == 30.0
+
+    # fanspeed and voltage exist but are not enabled by default.
+    for entity_id in ("sensor.core_sw01_fan_1", "sensor.core_sw01_psu_1"):
+        entry = registry.async_get(entity_id)
+        assert entry is not None, entity_id
+        assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+        assert hass.states.get(entity_id) is None
+
+
+async def test_implausible_sensor_is_unavailable_not_wrong(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A garbage reading must not reach the recorder as a real temperature."""
+    await setup_integration(hass, mock_config_entry)
+
+    state = hass.states.get("sensor.garage_ap_temp1")
+    assert state is not None
+    assert state.state == STATE_UNAVAILABLE
+
+
+async def test_skipped_sensors_have_no_entity(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Deleted rows and state enums leave nothing behind in the registry."""
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+
+    ids = {e.entity_id for e in registry.entities.values()}
+    assert not any("retired_probe" in i for i in ids)
+    assert not any("system_status" in i for i in ids)
+
+
+async def test_health_sensor_recovers_when_the_reading_returns(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer,
+) -> None:
+    """The entity stays registered so a repaired sensor comes back on its own."""
+    from .conftest import async_poll
+
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get("sensor.garage_ap_temp1").state == STATE_UNAVAILABLE
+
+    sensors = [dict(s) for s in mock_librenms.sensors["sensors"]]
+    for sensor in sensors:
+        if sensor["sensor_id"] == 21:
+            sensor["sensor_current"] = 39.5
+    mock_librenms.set_sensors(sensors)
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("sensor.garage_ap_temp1").state == "39.5"

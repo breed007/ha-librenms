@@ -147,10 +147,40 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 | `sensor.<device>_hardware` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_operating_system` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. Raw LibreNMS string — it has no time zone, so it is not exposed as a timestamp |
+| `sensor.<device>_<sensor>` | sensor | One per LibreNMS health sensor — see below |
 
 Devices added in LibreNMS appear on the next poll without reloading the
 integration. Devices removed from LibreNMS go unavailable, and can then be
 deleted from the Home Assistant device page.
+
+### Health sensors
+
+LibreNMS already collects SNMP health readings — temperature, fan speed,
+voltage, current, power — and this exposes them as native Home Assistant
+sensors with the matching device classes, so you can automate on them
+directly. It costs one extra API call per poll regardless of fleet size,
+because LibreNMS returns every sensor in a single response.
+
+**Only temperature is enabled by default.** Everything else is registered but
+switched off, so enabling a class is a per-entity toggle rather than a
+setup decision. On a 22-device install this produced 62 enabled entities out
+of 90 registered — worth knowing before you enable more on a large fleet.
+
+Two things are handled that the raw API does not make obvious:
+
+- **Readings are not rescaled.** `sensor_current` arrives already scaled, even
+  though the payload also carries `sensor_divisor` and `sensor_multiplier`.
+  Applying those again puts every voltage out by a factor of 1000.
+- **Impossible readings become unavailable rather than values.** Hardware that
+  cannot read a sensor tends to return a 32-bit sentinel instead of nothing —
+  real instances report temperatures of 4294704 °C while the sensor's own
+  limits stay perfectly sane. Those entities go unavailable and recover on
+  their own if the reading comes back, and the integration logs a one-time
+  warning saying how many were affected.
+
+`state` sensors are deliberately omitted. They are enumerations whose meaning
+lives in LibreNMS's translation tables, which this endpoint does not carry, so
+a bare `2` could mean healthy or failed.
 
 ### Detecting a stalled poller
 

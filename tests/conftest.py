@@ -30,6 +30,7 @@ FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures"
 SYSTEM_PATTERN = re.compile(r"/api/v0/system(\?|$)")
 DEVICES_PATTERN = re.compile(r"/api/v0/devices(\?|$)")
 ALERTS_PATTERN = re.compile(r"/api/v0/alerts(\?|$)")
+SENSORS_PATTERN = re.compile(r"/api/v0/resources/sensors(\?|$)")
 
 
 def load_fixture_json(name: str) -> dict[str, Any]:
@@ -49,12 +50,14 @@ class MockLibreNMS:
         self.system = load_fixture_json("system.json")
         self.devices = load_fixture_json("devices.json")
         self.alerts = load_fixture_json("alerts.json")
+        self.sensors = load_fixture_json("sensors.json")
         self.status = 200
         self.exception: Exception | None = None
 
         mocker.get(SYSTEM_PATTERN, side_effect=self._responder("system"))
         mocker.get(DEVICES_PATTERN, side_effect=self._responder("devices"))
         mocker.get(ALERTS_PATTERN, side_effect=self._responder("alerts"))
+        mocker.get(SENSORS_PATTERN, side_effect=self._responder("sensors"))
 
     def _responder(
         self, attribute: str
@@ -86,6 +89,10 @@ class MockLibreNMS:
     def set_devices(self, devices: list[dict[str, Any]]) -> None:
         """Replace the device list returned by the instance."""
         self.devices = {"status": "ok", "count": len(devices), "devices": devices}
+
+    def set_sensors(self, sensors: list[dict[str, Any]]) -> None:
+        """Replace the health sensor list returned by the instance."""
+        self.sensors = {"status": "ok", "count": len(sensors), "sensors": sensors}
 
 
 @pytest.fixture(autouse=True)

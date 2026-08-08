@@ -63,3 +63,31 @@ UPTIME_DRIFT_TOLERANCE: Final = 60
 # fleet has not advanced for this long. LibreNMS polls devices every 300s by
 # default, so this allows three full cycles before crying wolf.
 POLLER_STALE_AFTER: Final = 900
+
+# `state` sensors are enumerations whose meaning lives in LibreNMS's state
+# translation tables, which the sensors endpoint does not carry. A bare "2"
+# could mean healthy or failed, so publishing them would be worse than
+# omitting them.
+IGNORED_SENSOR_CLASSES: Final = frozenset({"state"})
+
+# Hardware that cannot read a sensor often reports a 32-bit sentinel rather
+# than nothing at all -- real instances return temperatures of 4294704.096 C
+# while the sensor's own limits stay perfectly sane. Readings outside these
+# bounds are treated as "no reading" instead of being published as fact.
+SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
+    "charge": (0.0, 100.0),
+    "current": (-10_000.0, 10_000.0),
+    "dbm": (-200.0, 50.0),
+    "fanspeed": (0.0, 100_000.0),
+    "frequency": (0.0, 1_000_000.0),
+    "humidity": (0.0, 100.0),
+    "load": (0.0, 100.0),
+    "power": (-1_000_000.0, 1_000_000.0),
+    "power_factor": (-1.0, 1.0),
+    "temperature": (-100.0, 250.0),
+    "voltage": (-1_000.0, 1_000.0),
+}
+
+# Fallback bound for classes with no specific range, to catch the same
+# sentinel values without guessing at real-world limits.
+SENSOR_ABSURD_MAGNITUDE: Final = 1e12
