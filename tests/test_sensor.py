@@ -205,3 +205,105 @@ async def test_problem_clears(
     await async_poll(hass, freezer)
 
     assert hass.states.get("binary_sensor.librenms_problem").state == "off"
+
+
+async def test_poller_stale_stays_off_while_polling_progresses(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A moving `last_polled` keeps the sensor quiet, however much time passes."""
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+
+    devices = list(mock_librenms.devices["devices"])
+    for minute in range(1, 4):
+        devices[0] = {**devices[0], "last_polled": f"2025-07-28 10:0{minute}:00"}
+        mock_librenms.set_devices(devices)
+        await async_poll(hass, freezer, seconds=601)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+
+
+async def test_poller_stale_fires_when_the_marker_freezes(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An unchanged `last_polled` past the threshold means nothing is polling."""
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+    assert hass.states.get("binary_sensor.librenms_problem").state == "on"
+
+    # Devices keep reporting, but none of them has been polled since.
+    await async_poll(hass, freezer, seconds=901)
+
+    stale = hass.states.get("binary_sensor.librenms_poller_stale")
+    assert stale.state == "on"
+    assert stale.attributes["last_advanced"] == "2025-07-28 09:14:03"
+    assert stale.attributes["stalled_for_seconds"] >= 900
+
+
+async def test_poller_stale_clears_when_polling_resumes(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Recovery is detected on the first poll that advances the marker."""
+    await setup_integration(hass, mock_config_entry)
+    await async_poll(hass, freezer, seconds=901)
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
+
+    devices = list(mock_librenms.devices["devices"])
+    devices[0] = {**devices[0], "last_polled": "2025-07-28 11:00:00"}
+    mock_librenms.set_devices(devices)
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+
+
+async def test_poller_stale_drives_the_problem_sensor(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A silent instance must not read as healthy.
+
+    Everything else is green here -- no devices down, no alerts -- which is
+    exactly the state a dead poller produces.
+    """
+    devices = [
+        {**d, "status": 1, "status_reason": ""}
+        for d in mock_librenms.devices["devices"]
+    ]
+    mock_librenms.set_devices(devices)
+    mock_librenms.set_alerts([])
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get("binary_sensor.librenms_problem").state == "off"
+
+    await async_poll(hass, freezer, seconds=901)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
+    assert hass.states.get("binary_sensor.librenms_problem").state == "on"
+
+
+async def test_poller_stale_is_unjudged_without_poll_times(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """No `last_polled` anywhere means there is nothing to judge, not a fault."""
+    mock_librenms.set_devices(
+        [{"device_id": 1, "hostname": "sw01", "status": 1, "icon": "ubiquiti.svg"}]
+    )
+    await setup_integration(hass, mock_config_entry)
+    await async_poll(hass, freezer, seconds=901)
+
+    stale = hass.states.get("binary_sensor.librenms_poller_stale")
+    assert stale.state == "off"
+    assert stale.attributes["last_advanced"] is None

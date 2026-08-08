@@ -51,6 +51,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "poller_stale": {
+        "name": "Poller stale"
+      },
       "problem": {
         "name": "Problem"
       },

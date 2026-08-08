@@ -1,6 +1,12 @@
 {
   "entity": {
     "binary_sensor": {
+      "poller_stale": {
+        "default": "mdi:radar",
+        "state": {
+          "on": "mdi:timer-alert-outline"
+        }
+      },
       "problem": {
         "default": "mdi:alert-circle-check",
         "state": {

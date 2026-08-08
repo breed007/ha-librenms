@@ -58,3 +58,8 @@ LARGE_INSTALL_DEVICE_COUNT: Final = 500
 # more than this many seconds. Poll jitter otherwise causes a state write on
 # every single update.
 UPTIME_DRIFT_TOLERANCE: Final = 60
+
+# Report the poller as stuck once the newest `last_polled` across the whole
+# fleet has not advanced for this long. LibreNMS polls devices every 300s by
+# default, so this allows three full cycles before crying wolf.
+POLLER_STALE_AFTER: Final = 900

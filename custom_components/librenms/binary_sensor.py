@@ -23,7 +23,12 @@ async def async_setup_entry(
     """Set up LibreNMS binary sensors."""
     coordinator = entry.runtime_data
 
-    async_add_entities([LibreNMSProblemBinarySensor(coordinator)])
+    async_add_entities(
+        [
+            LibreNMSProblemBinarySensor(coordinator),
+            LibreNMSPollerStaleBinarySensor(coordinator),
+        ]
+    )
 
     async_setup_device_entities(
         coordinator,
@@ -61,6 +66,36 @@ class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
                 if not device.up
                 and (self.coordinator.include_disabled or not device.excluded)
             ),
+        }
+
+
+class LibreNMSPollerStaleBinarySensor(LibreNMSEntity, BinarySensorEntity):
+    """On when LibreNMS has stopped polling anything.
+
+    This is the sensor that protects every other sensor. If the poller dies,
+    device states freeze at their last known values and the whole integration
+    reports a healthy network that nobody is actually checking.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = "poller_stale"
+
+    def __init__(self, coordinator: LibreNMSDataUpdateCoordinator) -> None:
+        """Initialise the binary sensor."""
+        super().__init__(coordinator, "poller_stale")
+
+    @property
+    def is_on(self) -> bool:
+        """Return True once the newest poll time has stopped advancing."""
+        return self.coordinator.data.poller_stale
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return when polling last progressed, and for how long it hasn't."""
+        data = self.coordinator.data
+        return {
+            "last_advanced": data.poller_last_advanced,
+            "stalled_for_seconds": round(data.poller_stalled_for),
         }
 
 

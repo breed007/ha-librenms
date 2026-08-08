@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     LibreNMSAuthError,
@@ -31,6 +32,7 @@ from .const import (
     EVENT_ALERT,
     EVENT_TYPE_RECOVERED,
     LARGE_INSTALL_DEVICE_COUNT,
+    POLLER_STALE_AFTER,
     SEVERITY_CRITICAL,
     SEVERITY_OK,
     SEVERITY_WARNING,
@@ -217,11 +219,18 @@ class LibreNMSData:
     alerts_warning: int
     new_alerts: list[LibreNMSAlert]
     recovered_alerts: list[LibreNMSAlert]
+    poller_stale: bool
+    poller_last_advanced: str | None
+    poller_stalled_for: float
 
     @property
     def has_problem(self) -> bool:
-        """Return True if anything warrants attention right now."""
-        return self.devices_down > 0 or self.alerts_critical > 0
+        """Return True if anything warrants attention right now.
+
+        A stuck poller counts. Without it every other signal here reads as
+        healthy precisely when nothing is being measured.
+        """
+        return self.devices_down > 0 or self.alerts_critical > 0 or self.poller_stale
 
 
 class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
@@ -247,6 +256,12 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._seen_alerts: dict[int, str] = {}
         self._primed = False
         self._warned_large_install = False
+
+        # Newest `last_polled` seen across the fleet, and when it last moved.
+        # Detecting that this stops advancing is what catches a stuck poller;
+        # see _resolve_poller_health for why it is not an age comparison.
+        self._poll_marker: str | None = None
+        self._poll_marker_moved: datetime | None = None
 
         super().__init__(
             hass,
@@ -330,10 +345,46 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             ),
             new_alerts=[],
             recovered_alerts=[],
+            poller_stale=False,
+            poller_last_advanced=None,
+            poller_stalled_for=0.0,
         )
 
+        self._resolve_poller_health(data)
         self._resolve_alert_deltas(data)
         return data
+
+    def _resolve_poller_health(self, data: LibreNMSData) -> None:
+        """Flag a poller that has stopped making progress.
+
+        Deliberately not an age comparison. LibreNMS returns `last_polled` as a
+        naive local-time string with no zone, so comparing it against Home
+        Assistant's clock needs the instance's time zone and is silently wrong
+        if that guess is off. What actually matters is not how old the value is
+        but whether it is still moving, and that is answered by comparing the
+        string to the one from the previous poll -- no clock, no zone, no skew.
+        """
+        marker = max(
+            (
+                device.last_polled
+                for device in data.devices.values()
+                if device.last_polled
+            ),
+            default=None,
+        )
+        now = dt_util.utcnow()
+
+        if marker != self._poll_marker:
+            self._poll_marker = marker
+            self._poll_marker_moved = now
+
+        data.poller_last_advanced = marker
+        if marker is None or self._poll_marker_moved is None:
+            # Nothing reports a poll time, so there is nothing to judge.
+            return
+
+        data.poller_stalled_for = (now - self._poll_marker_moved).total_seconds()
+        data.poller_stale = data.poller_stalled_for > POLLER_STALE_AFTER
 
     def _resolve_alert_deltas(self, data: LibreNMSData) -> None:
         """Populate new/recovered alerts and fire bus events for each."""

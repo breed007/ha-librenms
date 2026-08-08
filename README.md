@@ -130,7 +130,8 @@ Saving options reloads the integration.
 | `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down **or** any critical alert is active. Attributes include `down_hostnames` |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes include `down_hostnames` |
+| `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling — see below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
 ### Per monitored device
@@ -150,6 +151,24 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 Devices added in LibreNMS appear on the next poll without reloading the
 integration. Devices removed from LibreNMS go unavailable, and can then be
 deleted from the Home Assistant device page.
+
+### Detecting a stalled poller
+
+If LibreNMS's poller stops, every device keeps its last known state. Nothing
+goes down, no alerts fire, and the dashboard stays green — while nothing is
+actually being checked. That is the failure mode `poller_stale` exists to
+catch, and it is why it also drives `binary_sensor.librenms_problem`.
+
+It works by watching whether the newest `last_polled` across the fleet is
+still *advancing*, rather than comparing it against the clock. LibreNMS
+returns that field as a naive local-time string with no time zone, so an age
+comparison would need to guess the instance's zone and would be silently
+wrong if the guess were off. Progress is the thing that matters, and it can
+be checked without a clock at all.
+
+The sensor turns on when the newest poll time has not moved for 15 minutes —
+three full cycles at LibreNMS's default 300 s poll interval. Attributes report
+`last_advanced` and `stalled_for_seconds`.
 
 ---
 
