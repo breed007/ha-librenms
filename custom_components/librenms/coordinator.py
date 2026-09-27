@@ -709,14 +709,11 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             data.poller_last_advanced = self._poll_marker
             return
 
-        if marker != self._poll_marker:
+        if marker != self._poll_marker or self._poll_marker_moved is None:
             self._poll_marker = marker
             self._poll_marker_moved = now
 
         data.poller_last_advanced = marker
-        if self._poll_marker_moved is None:
-            return
-
         data.poller_stalled_for = (now - self._poll_marker_moved).total_seconds()
         data.poller_stale = data.poller_stalled_for > POLLER_STALE_AFTER
 
