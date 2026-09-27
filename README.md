@@ -353,7 +353,7 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 |---|---|---|
 | `binary_sensor.<device>_status` | binary_sensor (`connectivity`) | Attributes: `status_reason`, `hostname`, `location`, `disabled`, `ignored` |
 | `sensor.<device>_active_alerts` | sensor | Active alerts for this device |
-| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and it only changes when the device reboots. Accurate to within LibreNMS's poll interval (5 minutes by default), because LibreNMS only refreshes uptime when it polls the device |
+| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and while the device is up it only changes when the device reboots. It reads `unknown` while the device is down, or when LibreNMS has no uptime for it, and is set again on the first poll after the device is back. Accurate to within LibreNMS's poll interval (5 minutes by default), because LibreNMS only refreshes uptime when it polls the device |
 | `sensor.<device>_hardware` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_operating_system` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. The raw LibreNMS string, which has no time zone, so it is not exposed as a timestamp |
@@ -457,6 +457,8 @@ De-duplication rules:
 - Alerts already open when Home Assistant starts do **not** replay.
 - An alert that stays open at the same severity fires once, not once per poll.
 - An alert that escalates (warning → critical) fires again at the new severity.
+  The same happens the other way: a critical alert that drops to warning
+  fires `warning`. The alert is still open, so this is not `recovered`.
 - Acknowledging an alert in LibreNMS, or LibreNMS marking it worse, better or
   changed, does not fire anything. The alert is still open.
 - When an alert clears, a `recovered` event carries the rule and hostname from

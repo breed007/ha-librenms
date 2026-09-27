@@ -254,8 +254,10 @@ def newest_first(alerts: Iterable[LibreNMSAlert]) -> list[LibreNMSAlert]:
     """Return alerts newest first, in an order that never depends on luck.
 
     LibreNMS timestamps are "YYYY-MM-DD HH:MM:SS" strings, so they sort as
-    text. Alerts with the same timestamp go by alert id, highest first:
-    LibreNMS numbers alert rows in the order it creates them. Alerts with no
+    text. Alerts with the same timestamp go by alert id, highest first. That
+    only makes the order stable from one poll to the next: LibreNMS keeps one
+    alert row per device and rule and reuses it every time that alert opens
+    again, so the id says nothing about which alert is newer. Alerts with no
     timestamp go last. Used wherever a capped alert list is published, so the
     cap always drops the oldest alerts.
     """
@@ -443,6 +445,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._warned_implausible = False
         self._warned_hidden_alerts = False
         self._sensors_failing = False
+        # Why the last sensors request failed, or None if it succeeded.
+        self._sensors_error: LibreNMSError | None = None
 
         # Newest `last_polled` seen across the fleet, and when it last moved.
         # Detecting that this stops advancing is what catches a stuck poller;
@@ -505,6 +509,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 self._raise_update_error(result)
         self._check_empty_device_list(raw_devices)
         ir.async_delete_issue(self.hass, DOMAIN, self._permission_issue_id)
+        self._note_sensor_availability()
 
         devices: dict[int, LibreNMSDevice] = {}
         for payload in raw_devices:
@@ -778,26 +783,38 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
     async def _async_fetch_sensors(self) -> list[dict[str, Any]] | None:
         """Return raw health sensors, or None if they could not be fetched.
 
-        Logs once when sensor data stops arriving and once when it returns,
-        rather than on every poll in between.
+        The reason is kept for _note_sensor_availability, which decides
+        what to log once the rest of the poll is known.
         """
         try:
             sensors = await self.client.async_get_sensors()
         except LibreNMSError as err:
+            self._sensors_error = err
+            return None
+        self._sensors_error = None
+        return sensors
+
+    def _note_sensor_availability(self) -> None:
+        """Log once when sensor data stops arriving and once when it returns.
+
+        Called only after devices and alerts succeeded in the same poll, so
+        "device status and alerts are unaffected" is true whenever it is
+        logged. A poll that failed outright is already reported as a failed
+        update, and the sensors outage is logged on the next poll that gets
+        this far.
+        """
+        if self._sensors_error is not None:
             if not self._sensors_failing:
                 self._sensors_failing = True
                 _LOGGER.warning(
                     "LibreNMS health sensors are unavailable until sensor data "
                     "can be fetched again; device status and alerts are "
                     "unaffected: %s",
-                    err,
+                    self._sensors_error,
                 )
-            return None
-
-        if self._sensors_failing:
+        elif self._sensors_failing:
             self._sensors_failing = False
             _LOGGER.info("LibreNMS health sensor data is available again")
-        return sensors
 
     def _resolve_poller_health(self, data: LibreNMSData) -> None:
         """Flag a poller that has stopped making progress.

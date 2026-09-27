@@ -129,6 +129,25 @@ async def test_escalation_refires(
     assert events[0].data["event_type"] == "critical"
 
 
+async def test_de_escalation_fires_the_new_severity(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A critical alert that drops to warning fires `warning`, not recovery.
+
+    Pins the behavior the README documents (QA live lab, N-6).
+    """
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.set_alerts([{**ALERT_101, "severity": "warning"}, ALERT_102])
+    await async_poll(hass, freezer)
+
+    assert [(e.data["id"], e.data["event_type"]) for e in events] == [(101, "warning")]
+
+
 async def test_recovery_fires_with_the_original_detail(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,

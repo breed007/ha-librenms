@@ -76,6 +76,37 @@ async def test_sensor_failure_leaves_the_core_working(
     assert _reauth_flows(hass) == []
 
 
+async def test_sensor_warning_waits_for_a_poll_the_core_survived(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA live lab, N-8: the sensors warning says the core is unaffected.
+
+    That is false in a poll where devices failed too, so the warning waits
+    for a poll in which devices and alerts succeeded. The failed poll
+    itself is already reported as a failed update.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail("sensors", status=500)
+    mock_librenms.fail("devices", status=500)
+    with caplog.at_level(logging.WARNING, logger="custom_components.librenms"):
+        await async_poll(hass, freezer)
+        assert "health sensors are unavailable" not in caplog.text
+
+        mock_librenms.recover("devices")
+        await async_poll(hass, freezer)
+        await async_poll(hass, freezer)
+
+    warnings = [
+        r for r in caplog.records if "health sensors are unavailable" in r.message
+    ]
+    assert len(warnings) == 1
+    assert hass.states.get("binary_sensor.core_sw01_status").state == "on"
+
+
 async def test_sensors_recover_on_their_own(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
