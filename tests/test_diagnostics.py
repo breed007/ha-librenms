@@ -6,6 +6,7 @@ import dataclasses
 import json
 from typing import Any
 
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -14,7 +15,7 @@ from custom_components.librenms.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 
-from .conftest import MockLibreNMS, load_fixture_json, setup_integration
+from .conftest import MockLibreNMS, async_poll, load_fixture_json, setup_integration
 from .const import TOKEN
 
 # Every field LibreNMS's device API returns that identifies the network, a
@@ -176,3 +177,74 @@ async def test_unknown_system_fields_are_left_out(
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
     assert "fx-future-value" not in _serialize(diagnostics)
+
+
+async def test_diagnostics_include_health_sensors(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Per-class counts, the implausible count and each reading are included."""
+    await setup_integration(hass, mock_config_entry)
+
+    sensors = (await async_get_config_entry_diagnostics(hass, mock_config_entry))[
+        "sensors"
+    ]
+
+    # Fixture: deleted rows and `state` enums are not published at all.
+    assert sensors["available"] is True
+    assert sensors["total"] == 5
+    assert sensors["by_class"] == {"fanspeed": 1, "temperature": 3, "voltage": 1}
+    assert sensors["implausible"] == 1
+    by_id = {sensor["sensor_id"]: sensor for sensor in sensors["sensors"]}
+    assert by_id[13] == {
+        "sensor_id": 13,
+        "device_id": 1,
+        "sensor_class": "voltage",
+        "value": 3.299,
+        "implausible": False,
+        "limit_high": 3.6,
+        "limit_low": 3.0,
+    }
+    assert by_id[21]["value"] is None
+    assert by_id[21]["implausible"] is True
+    # Descriptions are free text and stay out.
+    assert "PSU 1" not in _serialize(sensors)
+
+
+async def test_diagnostics_show_a_sensor_outage(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A failed sensors request is visible, not just an empty list."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail("sensors", status=500)
+    await async_poll(hass, freezer)
+
+    sensors = (await async_get_config_entry_diagnostics(hass, mock_config_entry))[
+        "sensors"
+    ]
+
+    assert sensors["available"] is False
+    assert sensors["total"] == 0
+
+
+async def test_diagnostics_include_poller_health(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A stalled poller shows up in diagnostics with how long it has been."""
+    await setup_integration(hass, mock_config_entry)
+    await async_poll(hass, freezer, seconds=901)
+
+    poller = (await async_get_config_entry_diagnostics(hass, mock_config_entry))[
+        "poller"
+    ]
+
+    assert poller["poller_stale"] is True
+    assert poller["last_advanced"] == "2025-07-28 09:14:03"
+    assert poller["stalled_for_seconds"] >= 900

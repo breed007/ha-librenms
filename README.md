@@ -417,7 +417,8 @@ size, 300 s is a reasonable starting point.
 To collect diagnostics: **Settings → Devices & Services → LibreNMS → ⋮ →
 Download diagnostics**. The file is built from a fixed list of fields that are
 safe to share, such as device ids, OS, model, software versions, up/down
-state and alert severities. Hostnames, device names, IP addresses, serial
+state, alert severities, health sensor readings by class, and whether the
+poller has stalled. Hostnames, device names, IP addresses, serial
 numbers, locations, SNMP settings and credentials, alert rule names, the
 instance URL and the API token are never included.
 

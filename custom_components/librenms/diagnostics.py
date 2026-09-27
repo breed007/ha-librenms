@@ -9,6 +9,7 @@ named below, so a new field in a future LibreNMS release cannot leak.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 from urllib.parse import urlparse
 
@@ -20,7 +21,13 @@ from .const import (
     CONF_URL,
     CONF_VERIFY_SSL,
 )
-from .coordinator import LibreNMSAlert, LibreNMSConfigEntry, LibreNMSDevice
+from .coordinator import (
+    LibreNMSAlert,
+    LibreNMSConfigEntry,
+    LibreNMSData,
+    LibreNMSDevice,
+    LibreNMSSensor,
+)
 
 # Instance facts from /system: software versions, nothing about the network.
 SYSTEM_FIELDS = (
@@ -75,6 +82,39 @@ def _alert(alert: LibreNMSAlert) -> dict[str, Any]:
     }
 
 
+def _sensor(sensor: LibreNMSSensor) -> dict[str, Any]:
+    """Return what is safe to share about one health sensor.
+
+    Deliberately absent: the description, which is free text ("Disk 1
+    WD101EFBX-68B0AN") that can carry models, serials or names.
+    """
+    return {
+        "sensor_id": sensor.sensor_id,
+        "device_id": sensor.device_id,
+        "sensor_class": sensor.sensor_class,
+        "value": sensor.value,
+        "implausible": sensor.implausible,
+        "limit_high": sensor.limit_high,
+        "limit_low": sensor.limit_low,
+    }
+
+
+def _sensors(data: LibreNMSData) -> dict[str, Any]:
+    """Summarize health sensors: whether they loaded, and what came back."""
+    sensors = [
+        sensor
+        for device_sensors in data.sensors_by_device.values()
+        for sensor in device_sensors
+    ]
+    return {
+        "available": data.sensors_available,
+        "total": len(sensors),
+        "by_class": dict(sorted(Counter(s.sensor_class for s in sensors).items())),
+        "implausible": sum(1 for sensor in sensors if sensor.implausible),
+        "sensors": [_sensor(sensor) for sensor in sensors],
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: LibreNMSConfigEntry
 ) -> dict[str, Any]:
@@ -112,4 +152,10 @@ async def async_get_config_entry_diagnostics(
             for device in data.devices.values()
         ],
         "alerts": [_alert(alert) for alert in data.alerts],
+        "sensors": _sensors(data),
+        "poller": {
+            "poller_stale": data.poller_stale,
+            "last_advanced": data.poller_last_advanced,
+            "stalled_for_seconds": round(data.poller_stalled_for),
+        },
     }
