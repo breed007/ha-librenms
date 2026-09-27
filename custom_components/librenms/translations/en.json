@@ -21,6 +21,18 @@
         "data": {
           "api_token": "API token"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure LibreNMS",
+        "description": "Change the address of your LibreNMS instance or its certificate setting. The API token stays the same, and all devices, entities and their history are kept.",
+        "data": {
+          "url": "URL",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you.",
+          "verify_ssl": "Turn this off only if your instance uses a self-signed certificate."
+        }
       }
     },
     "error": {
@@ -33,7 +45,8 @@
     },
     "abort": {
       "already_configured": "This LibreNMS instance is already configured.",
-      "reauth_successful": "Reauthentication was successful."
+      "reauth_successful": "Reauthentication was successful.",
+      "reconfigure_successful": "The LibreNMS connection was updated."
     }
   },
   "options": {

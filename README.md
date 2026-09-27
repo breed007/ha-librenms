@@ -148,6 +148,14 @@ Read this before you create the token.
 
 Saving options reloads the integration.
 
+### Changing the URL or certificate setting
+
+**Settings → Devices & Services → LibreNMS → ⋮ → Reconfigure** changes the
+instance URL or the *Verify SSL certificate* setting in place. The new address
+is checked with the existing token before it is saved, and the integration
+keeps all its devices, entities and history. There is no need to delete and
+re-add it, which would lose that history.
+
 ---
 
 ## Entities

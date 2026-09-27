@@ -10,7 +10,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -20,6 +20,8 @@ from custom_components.librenms import async_remove_config_entry_device
 from custom_components.librenms.const import (
     CONF_INCLUDE_DISABLED,
     CONF_SCAN_INTERVAL,
+    CONF_URL,
+    CONF_VERIFY_SSL,
     DOMAIN,
 )
 
@@ -393,3 +395,39 @@ async def test_stale_device_can_be_removed(
     )
     # The hub must survive for as long as the entry does.
     assert not await async_remove_config_entry_device(hass, mock_config_entry, hub)
+
+
+async def test_reconfigure_keeps_entities_and_moves_the_hub_link(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """History survives a URL change because the entry and entities do."""
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    before = {
+        e.entity_id: e.unique_id
+        for e in er.async_entries_for_config_entry(registry, mock_config_entry.entry_id)
+    }
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: "https://nms.example.com/librenms", CONF_VERIFY_SSL: True},
+    )
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    after = {
+        e.entity_id: e.unique_id
+        for e in er.async_entries_for_config_entry(registry, mock_config_entry.entry_id)
+    }
+    assert after == before
+    assert hass.states.get("binary_sensor.core_sw01_status").state == "on"
+
+    hub = get_device(hass, mock_config_entry)
+    assert hub.configuration_url == "https://nms.example.com/librenms"
+    assert get_device(hass, mock_config_entry, 1).configuration_url == (
+        "https://nms.example.com/librenms/device/device=1/"
+    )

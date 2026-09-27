@@ -358,3 +358,151 @@ async def test_reauth_rejects_a_role_that_cannot_list_devices(
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "insufficient_permissions"}
     assert mock_config_entry.data[CONF_API_TOKEN] == TOKEN
+
+
+NEW_URL = "https://nms.example.com/librenms"
+
+
+async def test_reconfigure_changes_url_and_ssl_in_place(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """The same entry is updated: new URL, new unique id, token untouched."""
+    mock_config_entry.add_to_hass(hass)
+    entry_id = mock_config_entry.entry_id
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        # Messy input is normalized, just like the first setup.
+        {CONF_URL: "nms.example.com/librenms/api/v0/", CONF_VERIFY_SSL: False},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert hass.config_entries.async_entries(DOMAIN) == [mock_config_entry]
+    assert mock_config_entry.entry_id == entry_id
+    assert mock_config_entry.unique_id == NEW_URL
+    assert mock_config_entry.title == NEW_URL
+    assert mock_config_entry.data == {
+        CONF_URL: NEW_URL,
+        CONF_API_TOKEN: TOKEN,
+        CONF_VERIFY_SSL: False,
+    }
+
+
+async def test_reconfigure_can_just_toggle_ssl(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Keeping the URL is not mistaken for adding the instance twice."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: BASE_URL, CONF_VERIFY_SSL: False}
+    )
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.unique_id == BASE_URL
+    assert mock_config_entry.data[CONF_VERIFY_SSL] is False
+
+
+async def test_reconfigure_refuses_a_url_another_entry_uses(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Two entries must never end up pointing at the same instance."""
+    mock_config_entry.add_to_hass(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        title=NEW_URL,
+        unique_id=NEW_URL,
+        data={CONF_URL: NEW_URL, CONF_API_TOKEN: "other", CONF_VERIFY_SSL: True},
+    )
+    other.add_to_hass(hass)
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: f"{NEW_URL}/", CONF_VERIFY_SSL: True}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert mock_config_entry.unique_id == BASE_URL
+    assert mock_config_entry.data[CONF_URL] == BASE_URL
+
+
+async def test_reconfigure_keeps_a_renamed_title(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+) -> None:
+    """A title the user chose is not overwritten with the new URL."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Home network",
+        unique_id=BASE_URL,
+        data={CONF_URL: BASE_URL, CONF_API_TOKEN: TOKEN, CONF_VERIFY_SSL: True},
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: NEW_URL, CONF_VERIFY_SSL: True}
+    )
+    await hass.async_block_till_done()
+
+    assert entry.title == "Home network"
+    assert entry.data[CONF_URL] == NEW_URL
+
+
+@pytest.mark.parametrize(
+    ("user_input", "failure", "expected_errors"),
+    [
+        (
+            {CONF_URL: "ftp://nms.example.com", CONF_VERIFY_SSL: True},
+            {},
+            {CONF_URL: "invalid_url"},
+        ),
+        (
+            {CONF_URL: NEW_URL, CONF_VERIFY_SSL: True},
+            {"status": 401},
+            {"base": "invalid_auth"},
+        ),
+        (
+            {CONF_URL: NEW_URL, CONF_VERIFY_SSL: True},
+            {"exception": ClientConnectionError("boom")},
+            {"base": "cannot_connect"},
+        ),
+    ],
+)
+async def test_reconfigure_validates_before_saving(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    user_input: dict,
+    failure: dict,
+    expected_errors: dict,
+) -> None:
+    """A URL that does not work with the existing token is not saved."""
+    mock_config_entry.add_to_hass(hass)
+    for key, value in failure.items():
+        setattr(mock_librenms, key, value)
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == expected_errors
+    assert mock_config_entry.data[CONF_URL] == BASE_URL
+    assert mock_config_entry.unique_id == BASE_URL

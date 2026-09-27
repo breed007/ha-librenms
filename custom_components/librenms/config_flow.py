@@ -62,6 +62,15 @@ STEP_USER_SCHEMA = vol.Schema(
     }
 )
 
+STEP_RECONFIGURE_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_URL): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.URL)
+        ),
+        vol.Required(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
+    }
+)
+
 STEP_REAUTH_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_API_TOKEN): TextSelector(
@@ -116,6 +125,33 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    async def _async_validate(
+        self, url: str, token: str, verify_ssl: bool
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Validate a connection and return the form errors and placeholders.
+
+        Both are empty when the URL and token work.
+        """
+        errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
+        try:
+            await async_validate_connection(self.hass, url, token, verify_ssl)
+        except LibreNMSAuthError:
+            errors["base"] = "invalid_auth"
+        except LibreNMSPermissionError:
+            errors["base"] = "insufficient_permissions"
+        except LibreNMSRedirectError as err:
+            errors["base"] = "redirected"
+            placeholders["redirect_url"] = err.location
+        except LibreNMSConnectionError:
+            errors["base"] = "cannot_connect"
+        except LibreNMSError:
+            errors["base"] = "unknown"
+        except Exception:
+            _LOGGER.exception("Unexpected error validating LibreNMS instance")
+            errors["base"] = "unknown"
+        return errors, placeholders
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -132,28 +168,10 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(base_url)
                 self._abort_if_unique_id_configured()
 
-                try:
-                    await async_validate_connection(
-                        self.hass,
-                        base_url,
-                        user_input[CONF_API_TOKEN],
-                        user_input[CONF_VERIFY_SSL],
-                    )
-                except LibreNMSAuthError:
-                    errors["base"] = "invalid_auth"
-                except LibreNMSPermissionError:
-                    errors["base"] = "insufficient_permissions"
-                except LibreNMSRedirectError as err:
-                    errors["base"] = "redirected"
-                    placeholders["redirect_url"] = err.location
-                except LibreNMSConnectionError:
-                    errors["base"] = "cannot_connect"
-                except LibreNMSError:
-                    errors["base"] = "unknown"
-                except Exception:
-                    _LOGGER.exception("Unexpected error validating LibreNMS instance")
-                    errors["base"] = "unknown"
-                else:
+                errors, placeholders = await self._async_validate(
+                    base_url, user_input[CONF_API_TOKEN], user_input[CONF_VERIFY_SSL]
+                )
+                if not errors:
                     return self.async_create_entry(
                         title=base_url,
                         data={**user_input, CONF_URL: base_url},
@@ -183,28 +201,13 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
         placeholders = {"url": entry.data[CONF_URL]}
 
         if user_input is not None:
-            try:
-                await async_validate_connection(
-                    self.hass,
-                    entry.data[CONF_URL],
-                    user_input[CONF_API_TOKEN],
-                    entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-                )
-            except LibreNMSAuthError:
-                errors["base"] = "invalid_auth"
-            except LibreNMSPermissionError:
-                errors["base"] = "insufficient_permissions"
-            except LibreNMSRedirectError as err:
-                errors["base"] = "redirected"
-                placeholders["redirect_url"] = err.location
-            except LibreNMSConnectionError:
-                errors["base"] = "cannot_connect"
-            except LibreNMSError:
-                errors["base"] = "unknown"
-            except Exception:
-                _LOGGER.exception("Unexpected error validating LibreNMS instance")
-                errors["base"] = "unknown"
-            else:
+            errors, extra = await self._async_validate(
+                entry.data[CONF_URL],
+                user_input[CONF_API_TOKEN],
+                entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            )
+            placeholders.update(extra)
+            if not errors:
                 return self.async_update_reload_and_abort(
                     entry, data_updates={CONF_API_TOKEN: user_input[CONF_API_TOKEN]}
                 )
@@ -214,6 +217,62 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=STEP_REAUTH_SCHEMA,
             description_placeholders=placeholders,
             errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the URL or certificate verification of an existing entry.
+
+        Keeps the same config entry, so entity ids and history survive; they
+        are keyed on the entry id, which delete and re-add would change.
+        """
+        errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            try:
+                base_url = normalize_url(user_input[CONF_URL])
+            except ValueError:
+                errors[CONF_URL] = "invalid_url"
+            else:
+                if base_url != entry.unique_id:
+                    # Refuse an instance another entry already monitors.
+                    await self.async_set_unique_id(base_url)
+                    self._abort_if_unique_id_configured()
+
+                errors, placeholders = await self._async_validate(
+                    base_url, entry.data[CONF_API_TOKEN], user_input[CONF_VERIFY_SSL]
+                )
+                if not errors:
+                    # Follow the URL in the title unless the user renamed it.
+                    title = (
+                        base_url
+                        if entry.title == entry.data.get(CONF_URL)
+                        else entry.title
+                    )
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        unique_id=base_url,
+                        title=title,
+                        data_updates={
+                            CONF_URL: base_url,
+                            CONF_VERIFY_SSL: user_input[CONF_VERIFY_SSL],
+                        },
+                    )
+
+        suggested = user_input or {
+            CONF_URL: entry.data.get(CONF_URL),
+            CONF_VERIFY_SSL: entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+        }
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_RECONFIGURE_SCHEMA, suggested
+            ),
+            errors=errors,
+            description_placeholders=placeholders,
         )
 
     @staticmethod
