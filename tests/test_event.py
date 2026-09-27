@@ -493,3 +493,30 @@ async def test_alert_never_shown_that_clears_fires_nothing(
     await async_poll(hass, freezer)
 
     assert _fired(events) == []
+
+
+async def test_event_entity_does_not_replay_on_a_failed_update(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA's N6: a failed update hands listeners the old data; it is not news.
+
+    Home Assistant calls listeners with the previous poll's data when an
+    update fails. The event entity used to fire that poll's alerts again,
+    so it showed a second, later event for alert 103.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_alerts([ALERT_101, ALERT_102, ALERT_103])
+    await async_poll(hass, freezer)
+    fired_at = hass.states.get("event.librenms_alerts").state
+
+    mock_librenms.status = 500
+    await async_poll(hass, freezer)
+    assert hass.states.get("event.librenms_alerts").state == "unavailable"
+    mock_librenms.status = 200
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("event.librenms_alerts").state == fired_at
