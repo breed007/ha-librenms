@@ -469,3 +469,27 @@ async def test_alert_open_at_startup_on_a_hidden_device_does_not_replay(
     await async_poll(hass, freezer)
 
     assert _fired(events) == []
+
+
+async def test_alert_never_shown_that_clears_fires_nothing(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA's N5: no `recovered` for an alert the user was never shown.
+
+    Alert 101 is open at startup, but its device is not in the list, so the
+    user never saw it. It then clears while the device is still hidden.
+    """
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.set_alerts([ALERT_102])
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == []
