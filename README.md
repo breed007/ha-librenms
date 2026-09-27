@@ -120,34 +120,54 @@ Menu labels have changed between versions; these addresses have not.
 As an admin, open `/users` (**Manage Users** in the gear menu) and add a
 user, for example `homeassistant`, with the **Global Read** role.
 
-You can do the same on the LibreNMS server instead. LibreNMS's own
-documentation runs `lnms` as the `librenms` user:
+You can do the same on the LibreNMS server instead. On a standard install,
+switch to the `librenms` user first, as LibreNMS's own documentation does,
+then run the command:
 
 ```bash
 su - librenms
 lnms user:add --role=global-read homeassistant
 ```
 
-The command asks for a password. It creates a local LibreNMS account, which
+With the official LibreNMS Docker image, run each `lnms` command in this
+guide through Docker Compose instead, from the directory that holds your
+compose file. The image's `lnms` switches to the `librenms` user by itself,
+so there is no `su` step:
+
+```bash
+docker compose exec librenms lnms user:add --role=global-read homeassistant
+```
+
+Here `librenms` is the name of the LibreNMS service in your compose file.
+
+The command asks for a password. Give the account a long random password,
+because it can see every device. It creates a local LibreNMS account, which
 can only sign in to the web interface if LibreNMS uses its own user
-database; the server method in step 2 never needs to sign in as it.
+database. If you create the token on the server in step 2, nobody ever
+needs to sign in as this account, so you do not need to keep the password.
 
 ### Step 2: create the token
 
 #### On the server (LibreNMS 26.9.0 or later)
 
-As the `librenms` user, run:
+As the `librenms` user (after `su - librenms`, as in step 1), run:
 
 ```bash
 lnms api:token-create homeassistant --name="Home Assistant"
+```
+
+With the official Docker image:
+
+```bash
+docker compose exec librenms lnms api:token-create homeassistant --name="Home Assistant"
 ```
 
 `homeassistant` is the username from step 1. `--name` is only a label for
 the token; without it the token is named `api-token`. The command prints the
 token once, on its own line after "Token created successfully." Copy it
 straight away, because it cannot be shown again. Tokens created this way do
-not expire. If LibreNMS runs in a container, run the `lnms` commands inside
-the container.
+not expire, so replacing one is up to you; see "Looking after the account
+and token" below.
 
 Do not use this command on LibreNMS 26.8.x. It exists there, but the token it
 creates is for LibreNMS's newer API, and the API this integration uses only
@@ -167,7 +187,8 @@ open it. Global Read does not include that permission, so give it to the
    alongside **Global Read**. Keep Global Read.
 3. Sign out, sign in as `homeassistant`, and open `/api-access`.
    - On 26.9.0 and later, create a token and leave **Expires in** empty so it
-     never expires.
+     never expires. Replacing it is then up to you; see "Looking after the
+     account and token" below.
    - On 26.4.0 to 26.8.x, use **Create API access token**. If the page also
      offers **Create v1 API token**, do not use that one: this integration's
      API does not accept v1 tokens on those versions.
@@ -215,17 +236,31 @@ and asks for a new one. The URL does not need re-entering.
   anyone who gets hold of the token can read them.
 - **Home Assistant backups contain the token.** It is stored with the
   integration's configuration, so every backup includes it. Treat those
-  backups as if they held your SNMP credentials. If one is exposed, revoke the
-  token and create a new one. On LibreNMS 26.9.0 and later,
-  `lnms api:token-list homeassistant` shows the account's tokens with their
-  ids, and `lnms api:token-revoke homeassistant <id>` revokes one. On any
-  version, the token can also be deleted on the `/api-access` page; from
-  26.4.0 that page only shows the signed-in account's own tokens, so sign in
-  as `homeassistant` with the API Access permission, as when creating it.
+  backups as if they held your SNMP credentials. If one is exposed, replace
+  the token as described in "Looking after the account and token" below.
 - **Use https.** Every poll sends the token to LibreNMS, and the response
   carries those credentials back. Over plain http, both cross your network
   unencrypted. If your instance only serves http, putting it behind a reverse
   proxy with TLS is worth doing before you connect Home Assistant to it.
+
+### Looking after the account and token
+
+- **Replacing the token.** A token that never expires is never replaced for
+  you. To replace one, create a new token as in step 2, enter it in Home
+  Assistant with **Reconfigure** on the integration (or at the prompt that
+  appears once the old token stops working), then revoke the old token.
+- **Revoking a token.** On LibreNMS 26.9.0 and later,
+  `lnms api:token-list homeassistant` shows the account's tokens with their
+  ids, and `lnms api:token-revoke homeassistant <id>` revokes one (with the
+  Docker image, put `docker compose exec librenms` in front, as in step 1).
+  On any version, a token can also be deleted on the `/api-access` page.
+  From 26.4.0 that page only shows the signed-in account's own tokens, so
+  sign in as `homeassistant` with the API Access permission, as when
+  creating it.
+- **Don't disable the account while Home Assistant uses it.** From LibreNMS
+  26.8.0, a disabled account's tokens stop working, so disabling
+  `homeassistant` takes the integration offline. On older versions the
+  tokens keep working, so disabling the account does not revoke them either.
 
 ---
 
