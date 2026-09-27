@@ -97,8 +97,8 @@ Two roles to avoid:
 
 The LibreNMS API returns alerts for every device, whichever devices the
 token's role can see. Alerts on devices the token cannot see are therefore
-ignored and logged once, which keeps the alert counts consistent with the
-devices Home Assistant shows.
+left out of the alert counts and logged once, which keeps the counts
+consistent with the devices Home Assistant shows.
 
 ### Which steps to follow
 
@@ -301,7 +301,7 @@ is no need to delete and re-add it, which would lose that history.
 | `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts you were already shown whose device is missing from the latest device list), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts on devices Home Assistant has that are missing from the latest device list; see [Alert events](#alert-events)), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
 | `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling. See below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
@@ -420,21 +420,24 @@ De-duplication rules:
   the last poll that saw it.
 - Events follow LibreNMS's list of open alerts, not the device list. A device
   that drops out of one response and comes back fires nothing, because its
-  alerts never cleared. An alert on a device the token cannot see fires
-  nothing until that device becomes visible.
+  alerts never cleared.
+- Only alerts on devices Home Assistant has count: the devices in the latest
+  device list, plus any it added on an earlier update that the latest list
+  left out. An alert on a device the token has never listed fires nothing,
+  and counts from the update where that device first appears.
 - If the device list comes back empty while Home Assistant already knows
   devices for the integration, including right after a restart or reload,
   the update counts as failed and entities go unavailable rather than
   reporting an all-clear. Three empty lists in a row, with nothing else in
   between, are accepted as real.
-- A critical alert you have already been shown keeps
-  `binary_sensor.librenms_problem` on until LibreNMS clears it, even if its
-  device drops out of the device list, and that holds across a reload or a
-  Home Assistant restart. The problem sensor's `alerts_critical_hidden`
-  attribute counts these alerts. If a device has left the token's view for
-  good, delete it from its device page in Home Assistant; its alerts then
-  stop holding the problem sensor on. If that device later comes back, reload
-  the integration to restore it.
+- An open critical alert on a device Home Assistant has keeps
+  `binary_sensor.librenms_problem` on until LibreNMS clears it, even while
+  the device is missing from the device list. A reload or a Home Assistant
+  restart gives the same result. The problem sensor's
+  `alerts_critical_hidden` attribute counts these alerts. If a device has
+  left the token's view for good, delete it from its device page in Home
+  Assistant; its alerts then stop counting. If that device later comes back,
+  reload the integration to restore it.
 
 ### Acknowledged alerts
 

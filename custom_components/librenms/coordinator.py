@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -326,11 +326,11 @@ class LibreNMSData:
     poller_stale: bool
     poller_last_advanced: str | None
     poller_stalled_for: float
-    # Critical alerts the user has already been shown that LibreNMS still
-    # lists as open, but whose device was missing from this poll's device
-    # list. They are not in the counts, which follow the visible devices,
-    # but they keep the problem sensor on: a device dropping out of a
-    # response is not the fault clearing.
+    # Open critical alerts on devices Home Assistant has for this entry but
+    # that were missing from this poll's device list. They are not in the
+    # counts, which follow the visible devices, but they keep the problem
+    # sensor on: a device dropping out of a response is not the fault
+    # clearing.
     alerts_critical_hidden: int = 0
 
     @property
@@ -371,18 +371,17 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         # Alert events are worked out from LibreNMS's own open-alert set, never
         # from which devices happened to come back in the same poll: a device
         # missing from one /devices response says nothing about its faults.
+        # Which alerts count at all is decided afresh on every update; see
+        # _devices_in_home_assistant.
         #
         # _known_alerts: alert id -> severity HA has already accounted for,
         # either by firing an event or because it was open at startup.
         # Severity is part of it so an escalation (warning -> critical)
         # re-fires; the LibreNMS state is not, because acknowledging an alert
         # or it getting worse or better is the same open fault.
-        # _shown_alerts: known alerts whose device was visible at some point,
-        # so a `recovered` never fires for an alert the user could not see.
         # _alert_records: the last record /alerts returned for each known
         # alert, so `recovered` can still name the rule and host.
         self._known_alerts: dict[int, str] = {}
-        self._shown_alerts: set[int] = set()
         self._alert_records: dict[int, LibreNMSAlert] = {}
         self._primed = False
         self._warned_large_install = False
@@ -478,8 +477,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             # /devices only lists what the token's user may see, but /alerts
             # applies no per-device permission check at all. Keep the counts
             # consistent with the visible devices, or the totals would count
-            # alerts on devices no entity can show. Events are worked out
-            # from open_alerts instead; see _resolve_alert_deltas.
+            # alerts on devices no entity can show. Events and the problem
+            # sensor are worked out from open_alerts instead; see
+            # _resolve_alert_deltas.
             if alert.device_id not in devices:
                 hidden_alerts += 1
                 continue
@@ -489,9 +489,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         if hidden_alerts and not self._warned_hidden_alerts:
             self._warned_hidden_alerts = True
             _LOGGER.warning(
-                "Ignoring %s LibreNMS alert(s) on devices this API token cannot "
-                "see. If devices are missing, give the token's LibreNMS user "
-                "the Global Read role",
+                "Leaving %s LibreNMS alert(s) on devices this API token cannot "
+                "see out of the alert counts. If devices are missing, give the "
+                "token's LibreNMS user the Global Read role",
                 hidden_alerts,
             )
 
@@ -578,6 +578,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
 
         These are the devices the user has been shown at some point and has
         not deleted, whether or not the latest device list includes them.
+        The registry indexes devices by config entry, so this costs well
+        under a millisecond per update even with a few thousand devices.
         """
         prefix = f"{self.config_entry.entry_id}_"
         ids: set[int] = set()
@@ -591,20 +593,24 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                         ids.add(device_id)
         return ids
 
-    @callback
-    def async_forget_device(self, device_id: int) -> None:
-        """Stop treating alerts on a deleted device as seen.
+    def _devices_in_home_assistant(self, data: LibreNMSData) -> set[int]:
+        """Return the devices whose alerts count, for this update.
 
-        Deleting a device in Home Assistant says the user no longer wants to
-        hear about it. Without this, an alert on a device that left the
-        token's view for good would hold the problem sensor on until the
-        alert cleared in LibreNMS.
+        That is every device in this update's list, plus every device
+        registered for this entry from an earlier one, even if LibreNMS
+        left it out this time. The rule is the same on every update,
+        including the first after a reload or restart, because the device
+        registry outlives the coordinator. So the problem sensor and alert
+        events give the same answer whether or not Home Assistant restarted
+        in between.
+
+        Alerts on devices the token has never listed do not count: /alerts
+        applies no per-device permission check, so a narrow role still sees
+        alerts for devices it cannot see. Deleting a device in Home
+        Assistant takes it out of the registry, which is how the user stops
+        a device that left the token's view for good from counting.
         """
-        self._shown_alerts -= {
-            alert_id
-            for alert_id, alert in self._alert_records.items()
-            if alert.device_id == device_id
-        }
+        return set(data.devices) | self._registered_device_ids()
 
     def _expects_devices(self) -> bool:
         """Return True if an empty device list would contradict what HA knows.
@@ -762,54 +768,43 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         `recovered`; a device dropping out of /devices does not, so a
         partial response cannot page an all-clear and then re-page the same
         fault as new once the device is back.
+
+        An alert takes part only while its device is in Home Assistant (see
+        _devices_in_home_assistant): it is announced, it can recover, and a
+        critical one holds the problem sensor on.
         """
         current = {alert.alert_id: alert for alert in open_alerts}
         visible = {alert.alert_id for alert in data.alerts}
+        in_home_assistant = self._devices_in_home_assistant(data)
 
         if not self._primed:
             # Seed on the first successful poll so a Home Assistant restart
             # does not replay every alert that was already open, including
             # ones on devices that are not visible at that moment.
-            #
-            # Which alerts the user has seen must survive a reload or restart
-            # too, or the problem sensor would report an all-clear for a
-            # fault LibreNMS still has open just because Home Assistant
-            # restarted during a blip. The device registry is the lasting
-            # record of the devices the user has seen, so an open alert on a
-            # device already registered for this entry counts as seen.
             self._primed = True
             self._known_alerts = {
                 alert_id: alert.severity for alert_id, alert in current.items()
             }
-            registered = self._registered_device_ids()
-            self._shown_alerts = {
-                alert_id
-                for alert_id, alert in current.items()
-                if alert_id in visible or alert.device_id in registered
-            }
             self._alert_records = dict(current)
         else:
+            cleared = [a for a in self._known_alerts if a not in current]
             data.recovered_alerts = [
                 self._alert_records[alert_id]
-                for alert_id in self._known_alerts
-                if alert_id not in current and alert_id in self._shown_alerts
+                for alert_id in cleared
+                if self._alert_records[alert_id].device_id in in_home_assistant
             ]
-            for alert_id in [a for a in self._known_alerts if a not in current]:
+            for alert_id in cleared:
                 del self._known_alerts[alert_id]
-                self._shown_alerts.discard(alert_id)
                 self._alert_records.pop(alert_id, None)
 
-            # Only alerts the user can see are announced. One whose device is
-            # not visible stays unannounced, and fires when its device
-            # appears.
             data.new_alerts = [
                 alert
-                for alert in data.alerts
-                if self._known_alerts.get(alert.alert_id) != alert.severity
+                for alert in current.values()
+                if alert.device_id in in_home_assistant
+                and self._known_alerts.get(alert.alert_id) != alert.severity
             ]
             for alert in data.new_alerts:
                 self._known_alerts[alert.alert_id] = alert.severity
-            self._shown_alerts |= visible
             for alert_id, alert in current.items():
                 if alert_id in self._known_alerts:
                     self._alert_records[alert_id] = alert
@@ -817,8 +812,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         data.alerts_critical_hidden = sum(
             1
             for alert_id, alert in current.items()
-            if alert_id in self._shown_alerts
-            and alert_id not in visible
+            if alert_id not in visible
+            and alert.device_id in in_home_assistant
             and alert.severity == SEVERITY_CRITICAL
         )
 

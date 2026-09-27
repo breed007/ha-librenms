@@ -70,9 +70,9 @@ class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
             "devices_down": data.devices_down,
             "alerts_critical": data.alerts_critical,
             "alerts_warning": data.alerts_warning,
-            # Open critical alerts the user was already shown whose device is
-            # missing from the latest device list. Not in alerts_critical,
-            # which follows the visible devices, but still a problem.
+            # Open critical alerts on devices Home Assistant has but the
+            # latest device list left out. Not in alerts_critical, which
+            # follows the visible devices, but still a problem.
             "alerts_critical_hidden": data.alerts_critical_hidden,
             "poller_stale": data.poller_stale,
             # Device names as shown in Home Assistant. `down_hostnames` keeps

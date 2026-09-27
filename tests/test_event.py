@@ -400,13 +400,18 @@ async def test_alert_clearing_while_its_device_is_hidden_recovers_once(
     assert events[0].data["hostname"] == "ap-garage.lan.example"
 
 
-async def test_alert_opening_while_hidden_fires_when_its_device_appears(
+async def test_alert_opening_while_its_device_is_hidden_fires_once(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """An alert the user has not heard about is announced once it is visible."""
+    """An alert on a device Home Assistant has is announced when it opens.
+
+    Device 1 is registered but missing from this device list. Its new alert
+    still counts, because the device is in Home Assistant, and the device
+    coming back is not a reason to announce it a second time.
+    """
     await setup_integration(hass, mock_config_entry)
     events = async_capture_events(hass, EVENT_ALERT)
     good = mock_librenms.devices
@@ -416,7 +421,7 @@ async def test_alert_opening_while_hidden_fires_when_its_device_appears(
     )
     mock_librenms.set_alerts([ALERT_101, ALERT_102, ALERT_103])
     await async_poll(hass, freezer)
-    assert _fired(events) == []
+    assert _fired(events) == [(103, "critical")]
 
     mock_librenms.devices = good
     await async_poll(hass, freezer)

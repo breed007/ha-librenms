@@ -45,8 +45,11 @@ from .conftest import (
     remove_device,
     setup_integration,
 )
+from .test_event import ALERT_101, ALERT_102
 
 PROBLEM = "binary_sensor.librenms_problem"
+# A critical alert on device 2 (the garage AP), distinct from ALERT_101.
+ALERT_201 = {**ALERT_101, "id": "201", "rule_id": "9", "name": "Radio down"}
 DEVICES = "sensor.librenms_devices"
 
 
@@ -60,6 +63,15 @@ def _record(hass: HomeAssistant, entity_id: str) -> list[str]:
 
     hass.bus.async_listen("state_changed", _listener)
     return states
+
+
+def _transitions(states: list[str]) -> list[str]:
+    """Return the distinct states in order, ignoring unavailable."""
+    result: list[str] = []
+    for state in states:
+        if state != STATE_UNAVAILABLE and (not result or result[-1] != state):
+            result.append(state)
+    return result
 
 
 def _fired(events: list[Event]) -> list[tuple[int, str]]:
@@ -301,8 +313,9 @@ async def test_blip_during_retry_count_is_not_carried_into_a_new_run(
 
 # Rule 2 has to hold across a reload or restart, not just within one run of
 # the coordinator. The device registry is the integration's lasting record of
-# which devices the user has seen, so at startup an open alert on a device
-# already in the registry counts as seen (QA round 3, F1).
+# which devices the user has seen, so an open alert on a device in the
+# registry counts on every update, the first after a reload included (QA
+# round 3, F1; round 4, R1).
 
 
 async def test_seen_alert_survives_a_reload_after_empty_lists(
@@ -414,6 +427,56 @@ async def test_seen_alert_survives_an_options_save_while_hidden(
     state = hass.states.get(PROBLEM)
     assert state.state == "on"
     assert state.attributes["alerts_critical_hidden"] == 1
+
+
+@pytest.mark.parametrize("reload", [False, True], ids=["no_reload", "reload"])
+async def test_alert_opened_while_hidden_counts_the_same_across_a_reload(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    reload: bool,
+) -> None:
+    """QA round 4, R1: one rule for which alerts count, on every update.
+
+    A critical alert opens on device 2 while the device is missing from the
+    list. Device 2 is still in Home Assistant, so the alert counts: it is
+    announced, holds the problem sensor on, and recovers when LibreNMS
+    clears it. A reload in the middle must not change any of that. Before
+    the fix the startup update used a wider rule than later updates, so a
+    reload turned the problem sensor on for an alert that had not counted,
+    and its clearing fired `recovered` with no `new`.
+    """
+    mock_librenms.set_alerts([ALERT_102])
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    problem = _record(hass, PROBLEM)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+
+    mock_librenms.set_alerts([ALERT_102, ALERT_201])
+    await async_poll(hass, freezer)
+    state = hass.states.get(PROBLEM)
+    assert (state.state, state.attributes["alerts_critical_hidden"]) == ("on", 1)
+    assert _fired(events) == [(201, "critical")]
+
+    if reload:
+        await hass.config_entries.async_reload(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+    await async_poll(hass, freezer)
+    state = hass.states.get(PROBLEM)
+    assert (state.state, state.attributes["alerts_critical_hidden"]) == ("on", 1)
+
+    mock_librenms.set_alerts([ALERT_102])
+    await async_poll(hass, freezer)
+    state = hass.states.get(PROBLEM)
+    assert (state.state, state.attributes["alerts_critical_hidden"]) == ("off", 0)
+    assert _fired(events) == [(201, "critical"), (201, "recovered")]
+    # The reload passes through unavailable; otherwise the sensor is off
+    # until the alert opens, and turns on and off exactly once.
+    assert _transitions(problem) == ["off", "on", "off"]
 
 
 async def test_deleting_the_stale_device_releases_its_alert(

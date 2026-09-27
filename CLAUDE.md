@@ -54,21 +54,30 @@ do with the network (a permission cache being rebuilt, a database hiccup, a
 role change). Three rules keep that from producing false events or a false
 all-clear, and they are deliberately independent of each other:
 
+One definition decides which alerts count, and it is applied afresh on
+every update, the first after a reload included (`_devices_in_home_assistant`):
+**an alert counts while its device is in Home Assistant**, meaning in this
+update's device list or registered for this entry from an earlier one. It
+keeps no history of its own; the device registry is the lasting record, so
+the answer never depends on whether Home Assistant restarted in between.
+Alerts on devices the token has never listed count for nothing (`/alerts`
+has no permission filter). Deleting a device in Home Assistant
+(`async_remove_config_entry_device`) removes it from the registry, which is
+the user's way to stop a device that left the token's view for good from
+counting. Before v0.3.1 startup used this rule and later updates used
+"visible", and a reload changed the answer (QA round 4, R1).
+
 1. **Alert events follow `/alerts`, never `/devices`.** The coordinator
-   tracks alerts it has accounted for (`_known_alerts`), which the user has
-   seen (`_shown_alerts`) and their last record. `new` fires only for a
-   visible alert; `recovered` only when LibreNMS stops listing a shown alert
-   as open. A device leaving the list and returning fires nothing.
-2. **The problem sensor follows open alerts the user has seen.** A shown
-   critical alert that is still open keeps `has_problem` true even when its
-   device is missing from the list (`alerts_critical_hidden`). Counts still
-   follow the visible devices, as the round-1 Global Read fix intended.
-   Alerts on devices the token never saw count for nothing. "Seen" must
-   survive a reload or restart, so at startup an open alert whose device is
-   already in the device registry for this entry counts as seen. Deleting
-   that device in Home Assistant (`async_remove_config_entry_device`) is the
-   user's way out: its alerts stop counting as seen immediately, and after a
-   reload the registry no longer lists it.
+   tracks alerts it has accounted for (`_known_alerts`, seeded at startup so
+   nothing replays) and their last record. `new` fires for an alert that
+   counts and is not known at its severity; `recovered` fires when LibreNMS
+   stops listing a known alert that still counts. A device leaving the list
+   and returning fires nothing.
+2. **The problem sensor follows open alerts that count.** An open critical
+   alert on a device that is registered but missing from the list keeps
+   `has_problem` true (`alerts_critical_hidden`).
+   Counts still follow the visible devices, as the round-1 Global Read fix
+   intended.
 3. **An unexpected empty list fails the update.** Devices are expected when
    the last published update had some, or, before the first success, when
    the device registry holds devices for the entry (so a reload or restart
