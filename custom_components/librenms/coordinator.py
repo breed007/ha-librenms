@@ -428,7 +428,13 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             # when another one fails.
             return_exceptions=True,
         )
-        for result in (raw_devices, raw_alerts, raw_sensors):
+        core = (raw_devices, raw_alerts)
+        # A rejected token outranks everything else in the same poll, so a
+        # 401 on one request starts reauth even if the other got a 403.
+        for result in core:
+            if isinstance(result, LibreNMSAuthError):
+                self._raise_update_error(result)
+        for result in (*core, raw_sensors):
             if isinstance(result, BaseException):
                 self._raise_update_error(result)
         self._check_empty_device_list(raw_devices)

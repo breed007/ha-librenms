@@ -246,3 +246,26 @@ async def test_one_empty_device_list_does_not_reset_the_count(
         mock_librenms.devices = good
         await async_poll(hass, freezer)
         assert hass.states.get("sensor.librenms_devices").state == "2"
+
+
+@pytest.mark.parametrize(
+    ("devices", "alerts"),
+    [(403, 401), (401, 403)],
+    ids=["dev403_al401", "dev401_al403"],
+)
+async def test_401_wins_over_403_in_the_same_poll(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    devices: int,
+    alerts: int,
+) -> None:
+    """A rejected token starts reauth now, whichever request saw the 401."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail("devices", status=devices)
+    mock_librenms.fail("alerts", status=alerts)
+
+    await async_poll(hass, freezer)
+
+    assert len(_reauth_flows(hass)) == 1
