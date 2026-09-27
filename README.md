@@ -190,6 +190,12 @@ Two things are handled that the raw API does not make obvious:
   their own if the reading comes back, and the integration logs a one-time
   warning saying how many were affected.
 
+If the sensors request fails (a timeout, an error from LibreNMS, a role that
+cannot read sensors), only the health sensors go unavailable. Device status,
+alerts and the problem sensor keep working, the failure is logged once, and
+the readings come back by themselves on the next successful poll. An instance
+with no health sensors at all is not treated as a failure.
+
 `state` sensors are deliberately omitted. They are enumerations whose meaning
 lives in LibreNMS's translation tables, which this endpoint does not carry, so
 a bare `2` could mean healthy or failed.
@@ -365,9 +371,17 @@ automation:
 LibreNMS instance behind a split-horizon DNS name is a common cause), and turn
 off *Verify SSL certificate* if the instance uses a self-signed certificate.
 
-**"Invalid API token"** — the token was rejected with a 401 or 403. Confirm
-the token still exists under **Settings → API → API Access**, and that the user
-it belongs to is not disabled.
+**"LibreNMS rejected the API token"**: LibreNMS answered 401. Confirm the
+token still exists under **Settings → API → API Access**, and that the user it
+belongs to is not disabled. A running integration asks for a new token when
+this happens.
+
+**"LibreNMS API token lacks permission"** (a repair, or an error during
+setup): LibreNMS accepted the token but answered 403 for devices or alerts, so
+the token's user has a role that cannot read them. Give that user the
+**Global Read** role. The integration does not ask for a new token in this
+case, because the token is fine; it recovers by itself on the next update
+once the role is fixed.
 
 **Entities go unavailable during a LibreNMS restart** — expected. The
 coordinator retries with backoff and entities come back on the next successful

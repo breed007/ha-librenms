@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -23,7 +22,20 @@ class LibreNMSConnectionError(LibreNMSError):
 
 
 class LibreNMSAuthError(LibreNMSError):
-    """Raised when the API token was rejected."""
+    """Raised when LibreNMS does not accept the API token at all (HTTP 401)."""
+
+
+class LibreNMSPermissionError(LibreNMSError):
+    """Raised when a valid token's user may not read an endpoint (HTTP 403).
+
+    Kept apart from LibreNMSAuthError on purpose. Asking for a new token
+    cannot fix a role problem: the same token passes validation again, the
+    entry reloads, hits the same 403, and the user is stuck in a loop.
+    """
+
+
+class LibreNMSNotFoundError(LibreNMSConnectionError):
+    """Raised on HTTP 404: the URL does not lead to this API endpoint."""
 
 
 def normalize_url(url: str) -> str:
@@ -85,9 +97,18 @@ class LibreNMSClient:
                 params=params,
                 timeout=ClientTimeout(total=REQUEST_TIMEOUT),
             ) as response:
-                if response.status in (401, 403):
+                if response.status == 401:
                     raise LibreNMSAuthError(
-                        f"LibreNMS rejected the API token (HTTP {response.status})"
+                        "LibreNMS rejected the API token (HTTP 401)"
+                    )
+                if response.status == 403:
+                    raise LibreNMSPermissionError(
+                        f"The API token's LibreNMS user is not allowed to read "
+                        f"{endpoint} (HTTP 403)"
+                    )
+                if response.status == 404:
+                    raise LibreNMSNotFoundError(
+                        f"LibreNMS returned HTTP 404 for {endpoint}"
                     )
                 response.raise_for_status()
                 # Reverse proxies and error pages routinely return the wrong
@@ -122,13 +143,13 @@ class LibreNMSClient:
         return system[0] if system else {}
 
     async def async_get_devices(self) -> list[dict[str, Any]]:
-        """Return every device known to the instance.
+        """Return every device the token's user is allowed to see.
 
         Note: unlike the ports endpoint, ``/devices`` has no ``columns``
-        parameter — the API always selects ``d.*``.
+        parameter; the API always returns the full device row.
         """
         payload = await self._request("devices")
-        return payload.get("devices") or []
+        return _as_list(payload, "devices")
 
     async def async_get_alerts(self) -> list[dict[str, Any]]:
         """Return every open alert, whatever state it has moved to.
@@ -144,24 +165,28 @@ class LibreNMSClient:
             "alerts",
             params={"state": ",".join(str(state) for state in OPEN_ALERT_STATES)},
         )
-        return payload.get("alerts") or []
+        return _as_list(payload, "alerts")
 
     async def async_get_sensors(self) -> list[dict[str, Any]]:
         """Return every health sensor across the whole instance.
 
         One call covers all devices, so adding health data costs a single
-        extra request per poll rather than one per device.
+        extra request per poll rather than one per device. LibreNMS answers
+        HTTP 404 ("Sensors do not exist") when there are none, which is an
+        empty result rather than a failure.
         """
-        payload = await self._request("resources/sensors")
-        return payload.get("sensors") or []
+        try:
+            payload = await self._request("resources/sensors")
+        except LibreNMSNotFoundError:
+            return []
+        return _as_list(payload, "sensors")
 
-    async def async_get_overview(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        """Fetch devices, alerts and sensors concurrently."""
-        devices, alerts, sensors = await asyncio.gather(
-            self.async_get_devices(),
-            self.async_get_alerts(),
-            self.async_get_sensors(),
-        )
-        return devices, alerts, sensors
+
+def _as_list(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """Return the list under `key`, rejecting any other shape."""
+    items = payload.get(key)
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise LibreNMSError(f"Unexpected response shape for {key}")
+    return [item for item in items if isinstance(item, dict)]

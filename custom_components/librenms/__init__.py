@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, issue_registry as ir
 
-from .const import DOMAIN
+from .const import DOMAIN, ISSUE_INSUFFICIENT_PERMISSIONS
 from .coordinator import LibreNMSConfigEntry, LibreNMSDataUpdateCoordinator
 
 PLATFORMS: list[Platform] = [
@@ -44,6 +44,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> 
 async def async_unload_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
+    """Drop any repair issue left behind by a removed entry."""
+    ir.async_delete_issue(
+        hass, DOMAIN, f"{ISSUE_INSUFFICIENT_PERMISSIONS}_{entry.entry_id}"
+    )
 
 
 async def async_remove_config_entry_device(

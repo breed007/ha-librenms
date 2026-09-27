@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -10,6 +11,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -18,6 +20,7 @@ from .api import (
     LibreNMSAuthError,
     LibreNMSClient,
     LibreNMSError,
+    LibreNMSPermissionError,
 )
 from .const import (
     ALERT_STATE_ACKNOWLEDGED,
@@ -33,6 +36,7 @@ from .const import (
     EVENT_ALERT,
     EVENT_TYPE_RECOVERED,
     IGNORED_SENSOR_CLASSES,
+    ISSUE_INSUFFICIENT_PERMISSIONS,
     LARGE_INSTALL_DEVICE_COUNT,
     OPEN_ALERT_STATES,
     POLLER_STALE_AFTER,
@@ -301,6 +305,10 @@ class LibreNMSData:
     alerts: list[LibreNMSAlert]
     alerts_by_device: dict[int, list[LibreNMSAlert]]
     sensors_by_device: dict[int, list[LibreNMSSensor]]
+    # False when the optional sensors endpoint failed on this poll. Health
+    # sensors then go unavailable rather than presenting old readings as
+    # current, while device status and alerts carry on unaffected.
+    sensors_available: bool
     devices_total: int
     devices_up: int
     devices_down: int
@@ -353,6 +361,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._warned_large_install = False
         self._warned_implausible = False
         self._warned_hidden_alerts = False
+        self._sensors_failing = False
 
         # Newest `last_polled` seen across the fleet, and when it last moved.
         # Detecting that this stops advancing is what catches a stuck poller;
@@ -387,17 +396,24 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             raise UpdateFailed(str(err)) from err
 
     async def _async_update_data(self) -> LibreNMSData:
-        """Fetch devices and alerts, and derive counts and alert deltas."""
-        try:
-            (
-                raw_devices,
-                raw_alerts,
-                raw_sensors,
-            ) = await self.client.async_get_overview()
-        except LibreNMSAuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except LibreNMSError as err:
-            raise UpdateFailed(str(err)) from err
+        """Fetch devices, alerts and sensors, and derive counts and deltas.
+
+        Devices and alerts are the core of the integration: if either fails,
+        the whole poll fails. Health sensors are optional, so a failure there
+        only takes the health sensors down.
+        """
+        raw_devices, raw_alerts, raw_sensors = await asyncio.gather(
+            self.client.async_get_devices(),
+            self.client.async_get_alerts(),
+            self._async_fetch_sensors(),
+            # Collect every outcome so no request is left running unobserved
+            # when another one fails.
+            return_exceptions=True,
+        )
+        for result in (raw_devices, raw_alerts, raw_sensors):
+            if isinstance(result, BaseException):
+                self._raise_update_error(result)
+        ir.async_delete_issue(self.hass, DOMAIN, self._permission_issue_id)
 
         devices: dict[int, LibreNMSDevice] = {}
         for payload in raw_devices:
@@ -441,7 +457,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
 
         sensors_by_device: dict[int, list[LibreNMSSensor]] = {}
         implausible = 0
-        for payload in raw_sensors:
+        for payload in raw_sensors or []:
             sensor = LibreNMSSensor.from_api(payload)
             if sensor is None:
                 continue
@@ -468,6 +484,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             alerts=alerts,
             alerts_by_device=alerts_by_device,
             sensors_by_device=sensors_by_device,
+            sensors_available=raw_sensors is not None,
             devices_total=len(counted),
             devices_up=devices_up,
             devices_down=len(counted) - devices_up,
@@ -493,6 +510,60 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._resolve_poller_health(data)
         self._resolve_alert_deltas(data)
         return data
+
+    @property
+    def _permission_issue_id(self) -> str:
+        """Return the repair issue id for this entry's permission problem."""
+        return f"{ISSUE_INSUFFICIENT_PERMISSIONS}_{self.config_entry.entry_id}"
+
+    def _raise_update_error(self, err: BaseException) -> None:
+        """Translate a failed core request into the right coordinator error.
+
+        Only a 401 means the token itself is bad and worth asking for a new
+        one. A 403 means the token works but its user's role is too narrow,
+        which a new token cannot fix, so it raises a repair issue that names
+        the role instead of starting reauthentication.
+        """
+        if isinstance(err, LibreNMSAuthError):
+            raise ConfigEntryAuthFailed(str(err)) from err
+        if isinstance(err, LibreNMSPermissionError):
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                self._permission_issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key=ISSUE_INSUFFICIENT_PERMISSIONS,
+                translation_placeholders={"url": self.client.base_url},
+            )
+            raise UpdateFailed(str(err)) from err
+        if isinstance(err, LibreNMSError):
+            raise UpdateFailed(str(err)) from err
+        raise err
+
+    async def _async_fetch_sensors(self) -> list[dict[str, Any]] | None:
+        """Return raw health sensors, or None if they could not be fetched.
+
+        Logs once when sensor data stops arriving and once when it returns,
+        rather than on every poll in between.
+        """
+        try:
+            sensors = await self.client.async_get_sensors()
+        except LibreNMSError as err:
+            if not self._sensors_failing:
+                self._sensors_failing = True
+                _LOGGER.warning(
+                    "LibreNMS health sensors are unavailable until sensor data "
+                    "can be fetched again; device status and alerts are "
+                    "unaffected: %s",
+                    err,
+                )
+            return None
+
+        if self._sensors_failing:
+            self._sensors_failing = False
+            _LOGGER.info("LibreNMS health sensor data is available again")
+        return sensors
 
     def _resolve_poller_health(self, data: LibreNMSData) -> None:
         """Flag a poller that has stopped making progress.

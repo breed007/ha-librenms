@@ -20,6 +20,8 @@ from custom_components.librenms.api import (
     LibreNMSClient,
     LibreNMSConnectionError,
     LibreNMSError,
+    LibreNMSNotFoundError,
+    LibreNMSPermissionError,
 )
 from custom_components.librenms.const import LARGE_INSTALL_DEVICE_COUNT
 from custom_components.librenms.coordinator import (
@@ -187,20 +189,47 @@ async def test_api_wraps_timeouts(
         await client.async_get_system()
 
 
-@pytest.mark.parametrize("status", [401, 403])
-async def test_api_raises_auth_error(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, status: int
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (401, LibreNMSAuthError),
+        (403, LibreNMSPermissionError),
+        (404, LibreNMSNotFoundError),
+    ],
+)
+async def test_api_maps_status_codes(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    status: int,
+    error: type[LibreNMSError],
 ) -> None:
-    """Both status codes LibreNMS uses for a bad token map to auth failure."""
+    """401 is a bad token; 403 is a valid token whose role is too narrow."""
     aioclient_mock.get(
-        f"{BASE_URL}/api/v0/system",
+        f"{BASE_URL}/api/v0/devices",
         status=status,
-        json={"status": "error", "message": "Unauthenticated."},
+        json={"status": "error", "message": "nope"},
     )
     client = LibreNMSClient(async_get_clientsession(hass), BASE_URL, TOKEN)
 
-    with pytest.raises(LibreNMSAuthError):
-        await client.async_get_system()
+    with pytest.raises(error) as raised:
+        await client.async_get_devices()
+    # A permission problem must never be mistaken for a bad token.
+    assert isinstance(raised.value, LibreNMSAuthError) is (status == 401)
+
+
+@pytest.mark.parametrize("key", ["devices", "alerts", "sensors"])
+async def test_api_rejects_a_non_list_collection(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, key: str
+) -> None:
+    """A collection that is not a list is an error, not a crash in parsing."""
+    path = "resources/sensors" if key == "sensors" else key
+    aioclient_mock.get(
+        f"{BASE_URL}/api/v0/{path}", json={"status": "ok", key: {"oops": 1}}
+    )
+    client = LibreNMSClient(async_get_clientsession(hass), BASE_URL, TOKEN)
+
+    with pytest.raises(LibreNMSError, match="Unexpected response shape"):
+        await getattr(client, f"async_get_{key}")()
 
 
 async def test_reauth_is_raised_from_a_running_entry(

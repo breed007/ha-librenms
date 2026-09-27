@@ -66,7 +66,7 @@ async def test_user_flow(hass: HomeAssistant, mock_librenms: MockLibreNMS) -> No
     ("failure", "expected_error"),
     [
         ({"status": 401}, "invalid_auth"),
-        ({"status": 403}, "invalid_auth"),
+        ({"status": 403}, "insufficient_permissions"),
         ({"status": 500}, "cannot_connect"),
         ({"exception": ClientConnectionError("boom")}, "cannot_connect"),
     ],
@@ -313,3 +313,48 @@ async def test_options_flow(
         CONF_SCAN_INTERVAL: 300,
         CONF_INCLUDE_DISABLED: True,
     }
+
+
+async def test_user_flow_rejects_a_role_that_cannot_list_devices(
+    hass: HomeAssistant, mock_librenms: MockLibreNMS
+) -> None:
+    """/system has no permission check, so devices are listed to prove access."""
+    mock_librenms.fail("devices", status=403, message="Insufficient permissions")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: BASE_URL, CONF_API_TOKEN: TOKEN, CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "insufficient_permissions"}
+
+
+async def test_reauth_rejects_a_role_that_cannot_list_devices(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A valid token with the wrong role is refused instead of being stored."""
+    mock_config_entry.add_to_hass(hass)
+    mock_librenms.fail("devices", status=403)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": SOURCE_REAUTH,
+            "entry_id": mock_config_entry.entry_id,
+            "unique_id": mock_config_entry.unique_id,
+        },
+        data=mock_config_entry.data,
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_API_TOKEN: "another-token"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "insufficient_permissions"}
+    assert mock_config_entry.data[CONF_API_TOKEN] == TOKEN

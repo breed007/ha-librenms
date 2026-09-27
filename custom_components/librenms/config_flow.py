@@ -29,6 +29,7 @@ from .api import (
     LibreNMSClient,
     LibreNMSConnectionError,
     LibreNMSError,
+    LibreNMSPermissionError,
     normalize_url,
 )
 from .const import (
@@ -91,15 +92,22 @@ async def async_validate_connection(
 ) -> dict[str, Any]:
     """Return instance info if the URL and token work.
 
+    `/system` has no permission check in LibreNMS, so it only proves the token
+    exists. Listing devices as well catches a role that cannot read them now,
+    rather than as a failing entry after setup.
+
     Raises:
         LibreNMSAuthError: If the token was rejected.
+        LibreNMSPermissionError: If the token's user may not list devices.
         LibreNMSConnectionError: If the instance could not be reached.
         LibreNMSError: For any other API-level failure.
     """
     client = LibreNMSClient(
         async_get_clientsession(hass, verify_ssl=verify_ssl), url, token
     )
-    return await client.async_get_system()
+    system = await client.async_get_system()
+    await client.async_get_devices()
+    return system
 
 
 class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -131,6 +139,8 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 except LibreNMSAuthError:
                     errors["base"] = "invalid_auth"
+                except LibreNMSPermissionError:
+                    errors["base"] = "insufficient_permissions"
                 except LibreNMSConnectionError:
                     errors["base"] = "cannot_connect"
                 except LibreNMSError:
@@ -175,6 +185,8 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except LibreNMSAuthError:
                 errors["base"] = "invalid_auth"
+            except LibreNMSPermissionError:
+                errors["base"] = "insufficient_permissions"
             except LibreNMSConnectionError:
                 errors["base"] = "cannot_connect"
             except LibreNMSError:

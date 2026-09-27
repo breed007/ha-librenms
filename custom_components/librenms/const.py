@@ -25,6 +25,10 @@ DEFAULT_VERIFY_SSL: Final = True
 API_PATH: Final = "/api/v0"
 REQUEST_TIMEOUT: Final = 15
 
+# Repair issue raised when the token's LibreNMS role cannot read devices or
+# alerts.
+ISSUE_INSUFFICIENT_PERMISSIONS: Final = "insufficient_permissions"
+
 # Bus event fired for every newly seen / recovered alert.
 EVENT_ALERT: Final = "librenms_alert"
 

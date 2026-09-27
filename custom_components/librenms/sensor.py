@@ -376,9 +376,14 @@ class LibreNMSHealthSensor(LibreNMSDeviceEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Unavailable when the sensor is gone, or its reading is nonsense."""
+        """Unavailable if sensor data failed, the sensor is gone, or it is junk."""
         sensor = self.sensor
-        return super().available and sensor is not None and sensor.value is not None
+        return (
+            super().available
+            and self.coordinator.data.sensors_available
+            and sensor is not None
+            and sensor.value is not None
+        )
 
     @property
     def native_value(self) -> float | None:

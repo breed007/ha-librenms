@@ -54,6 +54,9 @@ class MockLibreNMS:
         self.sensors = load_fixture_json("sensors.json")
         self.status = 200
         self.exception: Exception | None = None
+        # Per-endpoint failures, keyed by "system", "devices", "alerts" or
+        # "sensors". They take precedence over the instance-wide status.
+        self.failures: dict[str, dict[str, Any]] = {}
 
         mocker.get(SYSTEM_PATTERN, side_effect=self._responder("system"))
         mocker.get(DEVICES_PATTERN, side_effect=self._responder("devices"))
@@ -68,6 +71,10 @@ class MockLibreNMS:
         async def _side_effect(
             method: str, url: Any, data: Any
         ) -> AiohttpClientMockResponse:
+            if attribute in self.failures:
+                return AiohttpClientMockResponse(
+                    method=method, url=url, **self.failures[attribute]
+                )
             return AiohttpClientMockResponse(
                 method=method,
                 url=url,
@@ -78,6 +85,32 @@ class MockLibreNMS:
 
         return _side_effect
 
+    def fail(
+        self,
+        endpoint: str,
+        *,
+        status: int = 200,
+        message: str = "error",
+        text: str | None = None,
+        exc: Exception | None = None,
+    ) -> None:
+        """Make one endpoint fail the way LibreNMS or a proxy would.
+
+        An error status gets LibreNMS's own api_error() body; `text` replaces
+        the body outright (an HTML error page, say) and `exc` raises instead
+        of answering.
+        """
+        failure: dict[str, Any] = {"status": status, "exc": exc}
+        if text is not None:
+            failure["text"] = text
+        else:
+            failure["json"] = {"status": "error", "message": message}
+        self.failures[endpoint] = failure
+
+    def recover(self, endpoint: str) -> None:
+        """Let a failed endpoint answer normally again."""
+        self.failures.pop(endpoint, None)
+
     async def _alerts_responder(
         self, method: str, url: Any, data: Any
     ) -> AiohttpClientMockResponse:
@@ -87,6 +120,10 @@ class MockLibreNMS:
         parameter on commas. Returning every alert regardless would let a
         test pass against code that asks for the wrong states.
         """
+        if "alerts" in self.failures:
+            return AiohttpClientMockResponse(
+                method=method, url=url, **self.failures["alerts"]
+            )
         requested = url.query.get("state")
         wanted = requested.split(",") if requested is not None else ["1"]
         alerts = [

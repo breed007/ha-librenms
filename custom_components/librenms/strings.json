@@ -25,7 +25,8 @@
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the URL, that the instance is reachable from Home Assistant, and the SSL setting.",
-      "invalid_auth": "Invalid API token.",
+      "insufficient_permissions": "LibreNMS accepted the API token, but its user is not allowed to list devices. Give that user the Global Read role.",
+      "invalid_auth": "LibreNMS rejected the API token. Check that it still exists under Settings → API → API Access.",
       "invalid_url": "That does not look like a valid URL.",
       "unknown": "Unexpected error. Check the Home Assistant log for details."
     },
@@ -113,6 +114,12 @@
       "uptime": {
         "name": "Last boot"
       }
+    }
+  },
+  "issues": {
+    "insufficient_permissions": {
+      "title": "LibreNMS API token lacks permission",
+      "description": "LibreNMS at {url} accepted the API token but refused to return devices or alerts (HTTP 403). The user the token belongs to needs the Global Read role. Change it in LibreNMS under Settings → Manage → Users. The integration recovers on its own at the next update; there is no need to enter a new token."
     }
   }
 }
