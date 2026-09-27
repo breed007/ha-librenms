@@ -41,6 +41,7 @@ from .coordinator import (
     LibreNMSDataUpdateCoordinator,
     LibreNMSDevice,
     LibreNMSSensor,
+    newest_first,
 )
 from .entity import (
     LibreNMSDeviceEntity,
@@ -118,13 +119,16 @@ class LibreNMSDeviceSensorDescription(SensorEntityDescription):
 
 
 def _alert_attributes(data: LibreNMSData) -> dict[str, Any]:
-    """Return the active alert list, most severe and most recent first."""
+    """Return the active alert list, most severe first, then newest first.
+
+    Within a severity the order is newest_first's, so when the list is cut
+    at MAX_ALERT_ATTRIBUTES it is the oldest alerts that are left out.
+    """
+    # sorted() is stable, so grouping by severity keeps the newest-first
+    # order inside each group.
     ordered = sorted(
-        data.alerts,
-        key=lambda alert: (
-            SEVERITY_ORDER.get(alert.severity, 3),
-            alert.timestamp or "",
-        ),
+        newest_first(data.alerts),
+        key=lambda alert: SEVERITY_ORDER.get(alert.severity, 3),
     )
     return {
         "alerts": [alert.as_dict() for alert in ordered[:MAX_ALERT_ATTRIBUTES]],

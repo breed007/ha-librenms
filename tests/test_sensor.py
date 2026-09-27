@@ -91,6 +91,75 @@ async def test_active_alerts_attributes_are_capped(
     assert state.attributes["truncated"] is True
 
 
+def _alert(alert_id: int, severity: str, timestamp: str | None) -> dict:
+    """Return an open alert on device 1, with or without a timestamp."""
+    alert = {
+        "id": str(alert_id),
+        "device_id": "1",
+        "hostname": "core-sw01.lan.example",
+        "rule_id": "12",
+        "name": "Noisy rule",
+        "severity": severity,
+        "state": "1",
+    }
+    if timestamp is not None:
+        alert["timestamp"] = timestamp
+    return alert
+
+
+async def test_active_alerts_keep_the_newest_when_capped(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """The cap drops the oldest alerts, never the newest.
+
+    Before v0.3.1 the list was sorted oldest first, so on a busy instance
+    the alerts most likely to matter were the ones cut off.
+    """
+    # 60 alerts, one per minute, deliberately not in time order.
+    mock_librenms.set_alerts(
+        [
+            _alert(300 + minute, "warning", f"2025-07-28 10:{minute:02d}:00")
+            for minute in ((index * 7) % 60 for index in range(60))
+        ]
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    state = hass.states.get("sensor.librenms_active_alerts")
+    assert state.state == "60"
+    assert state.attributes["truncated"] is True
+    assert [alert["id"] for alert in state.attributes["alerts"]] == list(
+        range(359, 309, -1)
+    )
+
+
+async def test_active_alerts_order_severity_then_newest(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Most severe first, then newest; ties go to the higher alert id.
+
+    Alerts without a timestamp go last within their severity, and the
+    order does not depend on the order LibreNMS returned them in.
+    """
+    mock_librenms.set_alerts(
+        [
+            _alert(402, "critical", "2025-07-28 09:00:00"),
+            _alert(405, "warning", None),
+            _alert(406, "critical", "2025-07-28 11:00:00"),
+            _alert(401, "warning", "2025-07-28 10:00:00"),
+            _alert(404, "critical", None),
+            _alert(403, "critical", "2025-07-28 09:00:00"),
+        ]
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    alerts = hass.states.get("sensor.librenms_active_alerts").attributes["alerts"]
+    assert [alert["id"] for alert in alerts] == [406, 403, 402, 404, 401, 405]
+
+
 async def test_device_sensors(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,

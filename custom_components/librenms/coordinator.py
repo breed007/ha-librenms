@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -242,6 +242,26 @@ class LibreNMSAlert:
             "note": self.note,
             "acknowledged": self.acknowledged,
         }
+
+
+def newest_first(alerts: Iterable[LibreNMSAlert]) -> list[LibreNMSAlert]:
+    """Return alerts newest first, in an order that never depends on luck.
+
+    LibreNMS timestamps are "YYYY-MM-DD HH:MM:SS" strings, so they sort as
+    text. Alerts with the same timestamp go by alert id, highest first:
+    LibreNMS numbers alert rows in the order it creates them. Alerts with no
+    timestamp go last. Used wherever a capped alert list is published, so the
+    cap always drops the oldest alerts.
+    """
+    return sorted(
+        alerts,
+        key=lambda alert: (
+            alert.timestamp is not None,
+            alert.timestamp or "",
+            alert.alert_id,
+        ),
+        reverse=True,
+    )
 
 
 @dataclass(slots=True)
@@ -846,16 +866,12 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 if alert_id in self._known_alerts:
                     self._alert_records[alert_id] = alert
 
-        data.hidden_alerts = sorted(
-            (
-                alert
-                for alert_id, alert in current.items()
-                if alert_id not in visible
-                and alert.device_id in in_home_assistant
-                and alert.severity == SEVERITY_CRITICAL
-            ),
-            key=lambda alert: alert.timestamp or "",
-            reverse=True,
+        data.hidden_alerts = newest_first(
+            alert
+            for alert_id, alert in current.items()
+            if alert_id not in visible
+            and alert.device_id in in_home_assistant
+            and alert.severity == SEVERITY_CRITICAL
         )
         data.hidden_device_names = {
             alert.device_id: in_home_assistant[alert.device_id]

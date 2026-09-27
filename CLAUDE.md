@@ -65,8 +65,12 @@ Alerts on devices the token has never listed count for nothing (`/alerts`
 has no permission filter). Deleting a device in Home Assistant
 (`async_remove_config_entry_device`) removes it from the registry, which is
 the user's way to stop a device that left the token's view for good from
-counting. Before v0.3.1 startup used this rule and later updates used
-"visible", and a reload changed the answer (QA round 4, R1).
+counting. "Seen" no longer means "shown in a previous update": an alert
+that opens while its registered device is missing from the list counts at
+once, so it fires `new` and a critical one turns the problem sensor on
+without waiting for the device to return (Brian confirmed this, v0.3.1).
+Before v0.3.1 startup used this rule and later updates used "visible", and
+a reload changed the answer (QA round 4, R1).
 
 1. **Alert events follow `/alerts`, never `/devices`.** The coordinator
    tracks alerts it has accounted for (`_known_alerts`, seeded at startup so

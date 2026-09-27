@@ -321,10 +321,10 @@ is no need to delete and re-add it, which would lose that history.
 | `sensor.librenms_devices_up` | sensor | |
 | `sensor.librenms_devices_down` | sensor | |
 | `sensor.librenms_devices_excluded` | sensor | Disabled/ignored devices. Diagnostic, disabled by default |
-| `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
+| `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list: most severe first, then newest first. Alerts with the same timestamp are ordered by alert id, highest first, and alerts with no timestamp come last in their severity. Capped at 50 entries for recorder health, so the oldest are the ones left out; `truncated` says whether it was cut |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts on devices Home Assistant has that are missing from the latest device list; see [Alert events](#alert-events)), `hidden_alerts` (those alerts, newest first and capped at 50, each with its id, device name, hostname, rule, severity and `acknowledged`), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts on devices Home Assistant has that are missing from the latest device list; see [Alert events](#alert-events)), `hidden_alerts` (those alerts, in the same newest-first order as `alerts` and capped at 50, each with its id, device name, hostname, rule, severity and `acknowledged`), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
 | `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling. See below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
@@ -446,8 +446,10 @@ De-duplication rules:
   alerts never cleared.
 - An alert counts only if its device is in Home Assistant: either in the
   latest device list, or added on an earlier update and left out of the
-  latest one. An alert on a device the token has never listed fires nothing
-  until that device appears.
+  latest one. That includes an alert that opens while its device is left
+  out: it fires, and a critical one turns `binary_sensor.librenms_problem`
+  on, right away. An alert on a device the token has never listed fires
+  nothing until that device appears.
 - If the device list comes back empty while Home Assistant already knows
   devices for the integration, including right after a restart or reload,
   the update counts as failed and entities go unavailable rather than
