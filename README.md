@@ -78,13 +78,25 @@ directory and restart.
 
 ## Setting up the LibreNMS API token
 
-**Create a dedicated read-only user for Home Assistant.** A LibreNMS API token
-inherits the permissions of the user it belongs to, and this integration never
-needs write access. Handing it an admin token means a leaked Home Assistant
-backup leaks admin access to your monitoring system.
+**Create a dedicated user for Home Assistant with the Global Read role.** A
+LibreNMS API token has the permissions of the user it belongs to. Global Read
+can see every device, alert and health sensor and cannot change anything,
+which is what this integration needs.
+
+Two roles to avoid:
+
+- **Normal User** sees only the devices explicitly assigned to it, which on
+  most installs is none. The integration would then show no devices at all.
+- **Admin** works, but this integration never writes to LibreNMS, and an admin
+  token in a leaked Home Assistant backup is admin access to your monitoring
+  system.
+
+LibreNMS returns alerts for every device regardless of role, so alerts on
+devices the token cannot see are ignored and logged once. That keeps the
+alert counts consistent with the devices Home Assistant shows.
 
 1. In LibreNMS, go to **Settings → Manage → Users → Add User**.
-2. Create a user (for example `homeassistant`) with the **Normal User** role.
+2. Create a user (for example `homeassistant`) with the **Global Read** role.
 3. Go to **Settings → API → API Access**.
 4. Click **Create API access token**, select the `homeassistant` user, give it
    a description, and confirm.

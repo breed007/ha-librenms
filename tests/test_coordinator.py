@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from aiohttp import ClientConnectionError
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import pytest
@@ -29,7 +30,7 @@ from custom_components.librenms.coordinator import (
     _as_str,
 )
 
-from .conftest import MockLibreNMS, setup_integration
+from .conftest import MockLibreNMS, async_poll, setup_integration
 from .const import BASE_URL, TOKEN
 
 
@@ -217,3 +218,40 @@ async def test_reauth_is_raised_from_a_running_entry(
     flows = hass.config_entries.flow.async_progress_by_handler("librenms")
     assert len(flows) == 1
     assert flows[0]["context"]["source"] == "reauth"
+
+
+async def test_alerts_on_devices_the_token_cannot_see_are_dropped(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Counts stay consistent with the devices the token can actually see.
+
+    LibreNMS filters /devices through hasDeviceAccess, so a Normal User only
+    gets the devices assigned to it, while /alerts applies no per-device
+    check and returns everything. Here only core-sw01 is assigned; the
+    critical alert on the garage AP must not surface.
+    """
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) == "1"]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.librenms"):
+        await setup_integration(hass, mock_config_entry)
+        await async_poll(hass, freezer)
+
+    active = hass.states.get("sensor.librenms_active_alerts")
+    assert active.state == "1"
+    assert [alert["id"] for alert in active.attributes["alerts"]] == [102]
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "0"
+    assert hass.states.get("sensor.librenms_warning_alerts").state == "1"
+    assert (
+        hass.states.get("binary_sensor.librenms_problem").attributes["alerts_critical"]
+        == 0
+    )
+    assert hass.states.get("binary_sensor.garage_ap_status") is None
+
+    hints = [r for r in caplog.records if "Global Read" in r.message]
+    assert len(hints) == 1

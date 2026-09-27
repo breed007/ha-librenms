@@ -352,6 +352,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._primed = False
         self._warned_large_install = False
         self._warned_implausible = False
+        self._warned_hidden_alerts = False
 
         # Newest `last_polled` seen across the fleet, and when it last moved.
         # Detecting that this stops advancing is what catches a stuck poller;
@@ -414,13 +415,29 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
 
         alerts: list[LibreNMSAlert] = []
         alerts_by_device: dict[int, list[LibreNMSAlert]] = {}
+        hidden_alerts = 0
         for payload in raw_alerts:
             alert = LibreNMSAlert.from_api(payload)
             if alert is None:
                 continue
+            # /devices only lists what the token's user may see, but /alerts
+            # applies no per-device permission check at all. Keep the two
+            # consistent, or the totals would count alerts on devices no
+            # entity can show.
+            if alert.device_id not in devices:
+                hidden_alerts += 1
+                continue
             alerts.append(alert)
-            if alert.device_id is not None:
-                alerts_by_device.setdefault(alert.device_id, []).append(alert)
+            alerts_by_device.setdefault(alert.device_id, []).append(alert)
+
+        if hidden_alerts and not self._warned_hidden_alerts:
+            self._warned_hidden_alerts = True
+            _LOGGER.warning(
+                "Ignoring %s LibreNMS alert(s) on devices this API token cannot "
+                "see. If devices are missing, give the token's LibreNMS user "
+                "the Global Read role",
+                hidden_alerts,
+            )
 
         sensors_by_device: dict[int, list[LibreNMSSensor]] = {}
         implausible = 0
