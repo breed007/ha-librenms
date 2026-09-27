@@ -145,8 +145,17 @@ def test_real_frequencies_are_readings(row: dict[str, Any], expected: float) -> 
             "sensor_current": 4294704.096,
             "sensor_divisor": 1000,
         },
+        # The same wrap with the sign flipped, -(2^32 - 1), as QA fed a
+        # live Pi clock. Frequency has no range of its own to catch it.
+        {**PI_ARM_CLOCK, "sensor_current": -4294967295},
     ],
-    ids=["frequency_wrap", "runtime_all_ones", "dbm_wrap_divided", "temp_wrap"],
+    ids=[
+        "frequency_wrap",
+        "runtime_all_ones",
+        "dbm_wrap_divided",
+        "temp_wrap",
+        "negative_all_ones",
+    ],
 )
 def test_wrapped_32_bit_readings_are_rejected(row: dict[str, Any]) -> None:
     """A raw value at the top of the 32-bit range is a sentinel in any class.
