@@ -10,7 +10,7 @@
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you.",
+          "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you. If you leave out the scheme, https is used.",
           "api_token": "The token value shown in LibreNMS API Access.",
           "verify_ssl": "Turn this off only if your instance uses a self-signed certificate."
         }
@@ -30,13 +30,14 @@
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you.",
+          "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you. If you leave out the scheme, https is used.",
           "verify_ssl": "Turn this off only if your instance uses a self-signed certificate."
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the URL, that the instance is reachable from Home Assistant, and the SSL setting.",
+      "cannot_connect_https_assumed": "Could not connect to {url}. No scheme was entered, so https was used. If your instance only serves plain http, enter {http_url} instead, knowing that the API token will then cross your network unencrypted. If it uses a self-signed certificate, turn off certificate verification instead.",
       "insufficient_permissions": "LibreNMS accepted the API token, but its user is not allowed to list devices. Give that user the Global Read role.",
       "invalid_auth": "LibreNMS rejected the API token. Check that it still exists under Settings → API → API Access.",
       "invalid_url": "That does not look like a valid URL.",

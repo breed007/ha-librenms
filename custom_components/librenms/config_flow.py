@@ -31,6 +31,8 @@ from .api import (
     LibreNMSError,
     LibreNMSPermissionError,
     LibreNMSRedirectError,
+    LibreNMSUnreachableError,
+    has_scheme,
     normalize_url,
 )
 from .const import (
@@ -126,11 +128,14 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def _async_validate(
-        self, url: str, token: str, verify_ssl: bool
+        self, url: str, token: str, verify_ssl: bool, *, https_assumed: bool = False
     ) -> tuple[dict[str, str], dict[str, str]]:
         """Validate a connection and return the form errors and placeholders.
 
-        Both are empty when the URL and token work.
+        Both are empty when the URL and token work. `https_assumed` means the
+        user typed no scheme; if nothing answered, the error then says https
+        was tried and how to choose http deliberately, rather than a generic
+        "failed to connect" for an instance that may only serve http.
         """
         errors: dict[str, str] = {}
         placeholders: dict[str, str] = {}
@@ -143,6 +148,13 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
         except LibreNMSRedirectError as err:
             errors["base"] = "redirected"
             placeholders["redirect_url"] = err.location
+        except LibreNMSUnreachableError:
+            if https_assumed:
+                errors["base"] = "cannot_connect_https_assumed"
+                placeholders["url"] = url
+                placeholders["http_url"] = "http://" + url.removeprefix("https://")
+            else:
+                errors["base"] = "cannot_connect"
         except LibreNMSConnectionError:
             errors["base"] = "cannot_connect"
         except LibreNMSError:
@@ -169,7 +181,10 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 errors, placeholders = await self._async_validate(
-                    base_url, user_input[CONF_API_TOKEN], user_input[CONF_VERIFY_SSL]
+                    base_url,
+                    user_input[CONF_API_TOKEN],
+                    user_input[CONF_VERIFY_SSL],
+                    https_assumed=not has_scheme(user_input[CONF_URL]),
                 )
                 if not errors:
                     return self.async_create_entry(
@@ -243,7 +258,10 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                     self._abort_if_unique_id_configured()
 
                 errors, placeholders = await self._async_validate(
-                    base_url, entry.data[CONF_API_TOKEN], user_input[CONF_VERIFY_SSL]
+                    base_url,
+                    entry.data[CONF_API_TOKEN],
+                    user_input[CONF_VERIFY_SSL],
+                    https_assumed=not has_scheme(user_input[CONF_URL]),
                 )
                 if not errors:
                     # Follow the URL in the title unless the user renamed it.

@@ -10,6 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+)
 
 from custom_components.librenms.const import (
     CONF_API_TOKEN,
@@ -506,3 +509,105 @@ async def test_reconfigure_validates_before_saving(
     assert result["errors"] == expected_errors
     assert mock_config_entry.data[CONF_URL] == BASE_URL
     assert mock_config_entry.unique_id == BASE_URL
+
+
+async def test_bare_host_that_fails_says_https_was_assumed(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """An http-only instance entered as a bare IP gets a specific, safe answer.
+
+    The flow never retries over http by itself: that would send the token,
+    and receive every SNMP credential, in cleartext without the user
+    choosing it.
+    """
+    mock_librenms.exception = ClientConnectionError("connection refused")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: "10.0.0.5:8000", CONF_API_TOKEN: TOKEN, CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect_https_assumed"}
+    assert result["description_placeholders"] == {
+        "url": "https://10.0.0.5:8000",
+        "http_url": "http://10.0.0.5:8000",
+    }
+    schemes = {call[1].scheme for call in aioclient_mock.mock_calls}
+    assert schemes == {"https"}
+
+
+async def test_bare_host_then_explicit_http_works(
+    hass: HomeAssistant, mock_librenms: MockLibreNMS
+) -> None:
+    """Typing http:// is the deliberate choice, and it is honored as typed."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_URL: "http://10.0.0.5:8000",
+            CONF_API_TOKEN: TOKEN,
+            CONF_VERIFY_SSL: True,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_URL] == "http://10.0.0.5:8000"
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        # An explicit scheme gets the plain message: nothing was assumed.
+        ({"url": "https://10.0.0.5", "exc": True}, "cannot_connect"),
+        # https answered, just with an error, so the hint would mislead.
+        ({"url": "10.0.0.5", "status": 500}, "cannot_connect"),
+    ],
+)
+async def test_https_hint_only_when_it_applies(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    failure: dict,
+    expected: str,
+) -> None:
+    """The https hint appears only for a bare host that got no answer."""
+    if failure.get("exc"):
+        mock_librenms.exception = ClientConnectionError("refused")
+    if "status" in failure:
+        mock_librenms.status = failure["status"]
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: failure["url"], CONF_API_TOKEN: TOKEN, CONF_VERIFY_SSL: True},
+    )
+
+    assert result["errors"] == {"base": expected}
+
+
+async def test_reconfigure_bare_host_gets_the_https_hint(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Reconfigure treats a bare host the same way as first setup."""
+    mock_config_entry.add_to_hass(hass)
+    mock_librenms.exception = ClientConnectionError("refused")
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: "10.0.0.5", CONF_VERIFY_SSL: True}
+    )
+
+    assert result["errors"] == {"base": "cannot_connect_https_assumed"}
+    assert result["description_placeholders"]["http_url"] == "http://10.0.0.5"

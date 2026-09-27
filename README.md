@@ -107,7 +107,7 @@ LibreNMS**, and enter:
 
 | Field | Notes |
 |---|---|
-| **URL** | `https://librenms.example.com`. Subpaths work (`https://host/librenms`). Leave off `/api/v0` — it is added for you, and pasting it is harmless. |
+| **URL** | `https://librenms.example.com`. Subpaths work (`https://host/librenms`). Leave off `/api/v0`; it is added for you, and pasting it is harmless. Without a scheme, https is used. The integration never switches to http by itself, so for an http-only instance type `http://` explicitly. |
 | **API token** | The token from step 5. |
 | **Verify SSL certificate** | Turn off only for self-signed certificates. |
 

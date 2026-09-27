@@ -42,6 +42,14 @@ class LibreNMSPermissionError(LibreNMSError):
     """
 
 
+class LibreNMSUnreachableError(LibreNMSConnectionError):
+    """Raised when no HTTP response came back at all.
+
+    Timeouts, refused connections, DNS failures and TLS errors, as opposed
+    to an instance that answered with an error status.
+    """
+
+
 class LibreNMSNotFoundError(LibreNMSConnectionError):
     """Raised on HTTP 404: the URL does not lead to this API endpoint."""
 
@@ -64,6 +72,11 @@ class LibreNMSRedirectError(LibreNMSConnectionError):
         self.location = location
 
 
+def has_scheme(url: str) -> bool:
+    """Return True if the user typed a scheme such as http:// or https://."""
+    return "://" in url
+
+
 def normalize_url(url: str) -> str:
     """Return a canonical base URL for a LibreNMS instance.
 
@@ -79,7 +92,10 @@ def normalize_url(url: str) -> str:
     if not candidate:
         raise ValueError("empty url")
 
-    if "://" not in candidate:
+    # Assume https, and never fall back to http on our own: over http the
+    # token, and the SNMP credentials LibreNMS returns with every device
+    # list, cross the network unencrypted. Plain http has to be asked for.
+    if not has_scheme(candidate):
         candidate = f"https://{candidate}"
 
     parsed = urlparse(candidate)
@@ -148,13 +164,13 @@ class LibreNMSClient:
                 # content type, so don't let aiohttp enforce it.
                 payload = await response.json(content_type=None)
         except TimeoutError as err:
-            raise LibreNMSConnectionError(f"Timeout connecting to {url}") from err
+            raise LibreNMSUnreachableError(f"Timeout connecting to {url}") from err
         except ClientResponseError as err:
             raise LibreNMSConnectionError(
                 f"LibreNMS returned HTTP {err.status} for {endpoint}"
             ) from err
         except ClientError as err:
-            raise LibreNMSConnectionError(f"Error connecting to {url}: {err}") from err
+            raise LibreNMSUnreachableError(f"Error connecting to {url}: {err}") from err
         except ValueError as err:
             raise LibreNMSError(
                 f"LibreNMS returned invalid JSON for {endpoint}"
