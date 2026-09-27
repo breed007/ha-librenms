@@ -224,7 +224,8 @@ If the sensors request fails (a timeout, an error from LibreNMS, a role that
 cannot read sensors), only the health sensors go unavailable. Device status,
 alerts and the problem sensor keep working, the failure is logged once, and
 the readings come back by themselves on the next successful poll. An instance
-with no health sensors at all is not treated as a failure.
+with no health sensors at all is not treated as a failure; LibreNMS says so
+explicitly, and any other "not found" answer from the sensors endpoint is.
 
 `state` sensors are deliberately omitted. They are enumerations whose meaning
 lives in LibreNMS's translation tables, which this endpoint does not carry, so

@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 
 from aiohttp import (
     ClientError,
+    ClientResponse,
     ClientResponseError,
     ClientSession,
     ClientTimeout,
@@ -17,6 +18,10 @@ from aiohttp import (
 from yarl import URL
 
 from .const import API_PATH, OPEN_ALERT_STATES, REQUEST_TIMEOUT
+
+# The exact message LibreNMS's list_sensors() returns, with HTTP 404, when an
+# instance has no sensors at all.
+NO_SENSORS_MESSAGE = "Sensors do not exist"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +56,18 @@ class LibreNMSUnreachableError(LibreNMSConnectionError):
 
 
 class LibreNMSNotFoundError(LibreNMSConnectionError):
-    """Raised on HTTP 404: the URL does not lead to this API endpoint."""
+    """Raised on HTTP 404.
+
+    `api_message` is the `message` from LibreNMS's JSON error body, when the
+    404 came with one. LibreNMS uses 404 both for "this route does not
+    exist" and for some empty results, and only the message tells them
+    apart.
+    """
+
+    def __init__(self, message: str, api_message: str | None = None) -> None:
+        """Record LibreNMS's own explanation alongside the error."""
+        super().__init__(message)
+        self.api_message = api_message
 
 
 class LibreNMSRedirectError(LibreNMSConnectionError):
@@ -150,8 +166,11 @@ class LibreNMSClient:
                         f"{endpoint} (HTTP 403)"
                     )
                 if response.status == 404:
+                    api_message = await _error_message(response)
                     raise LibreNMSNotFoundError(
                         f"LibreNMS returned HTTP 404 for {endpoint}"
+                        + (f": {api_message}" if api_message else ""),
+                        api_message,
                     )
                 if 300 <= response.status < 400:
                     raise LibreNMSRedirectError(
@@ -221,14 +240,30 @@ class LibreNMSClient:
 
         One call covers all devices, so adding health data costs a single
         extra request per poll rather than one per device. LibreNMS answers
-        HTTP 404 ("Sensors do not exist") when there are none, which is an
-        empty result rather than a failure.
+        HTTP 404 with the message "Sensors do not exist" when there are
+        none, which is an empty result rather than a failure. Any other 404
+        (a missing route, a proxy's error page) is a real failure and is
+        raised, so it is logged and shows in diagnostics instead of quietly
+        hiding every health sensor.
         """
         try:
             payload = await self._request("resources/sensors")
-        except LibreNMSNotFoundError:
-            return []
+        except LibreNMSNotFoundError as err:
+            if err.api_message == NO_SENSORS_MESSAGE:
+                return []
+            raise
         return _as_list(payload, "sensors")
+
+
+async def _error_message(response: ClientResponse) -> str | None:
+    """Return the `message` of a LibreNMS JSON error body, if there is one."""
+    try:
+        body = await response.json(content_type=None)
+    except (ClientError, ValueError):
+        return None
+    if isinstance(body, dict) and isinstance(body.get("message"), str):
+        return body["message"]
+    return None
 
 
 def _redirect_target(request_url: str, location: str | None, endpoint: str) -> str:

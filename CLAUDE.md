@@ -52,7 +52,7 @@ re-add.
 |---|---|---|
 | 401 | `LibreNMSAuthError` | Reauth (`ConfigEntryAuthFailed`) |
 | 403 | `LibreNMSPermissionError` | Repair issue naming the Global Read role. Never reauth: a new token cannot fix a role, and reauth would loop |
-| 404 | `LibreNMSNotFoundError` | Connection error; on `/resources/sensors` it means "no sensors" |
+| 404 | `LibreNMSNotFoundError` | Connection error. On `/resources/sensors`, only the body message "Sensors do not exist" means "no sensors"; any other 404 is a sensors failure |
 | 3xx | `LibreNMSRedirectError` | Redirects are never followed (see gotchas) |
 | no response | `LibreNMSUnreachableError` | Connection error; the flow explains a failed https guess |
 
@@ -77,7 +77,8 @@ same filtering LibreNMS does.**
   the raw payload and never put a raw payload in diagnostics.
 - **`/devices` has no `columns` parameter**; it always returns full rows.
 - **`/resources/sensors` answers 404 "Sensors do not exist"** when there are
-  none. That is an empty list, not an error.
+  none. That is an empty list, not an error. LibreNMS also answers 404 ("This
+  API route doesn't exist.") for a missing route, so check the message.
 - **`/system` has no permission middleware.** It proves a token exists, not
   that it can read anything; the config flow also lists devices.
 - **`uptime` is written once per LibreNMS poll** (every 300 s by default) and

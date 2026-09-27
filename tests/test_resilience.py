@@ -14,6 +14,9 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.librenms.const import DOMAIN
+from custom_components.librenms.diagnostics import (
+    async_get_config_entry_diagnostics,
+)
 
 from .conftest import MockLibreNMS, async_poll, setup_integration
 
@@ -288,3 +291,35 @@ async def test_permission_issue_is_removed_when_the_entry_unloads(
     await hass.async_block_till_done()
 
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # LibreNMS's api_not_found() body, for a route that does not exist.
+        {"status": 404, "message": "This API route doesn't exist."},
+        # A reverse proxy's own error page.
+        {"status": 404, "text": "<html><body><h1>404 Not Found</h1></body></html>"},
+    ],
+    ids=["route_missing", "proxy_page"],
+)
+async def test_other_sensor_404s_are_a_visible_failure(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    failure: dict[str, Any],
+) -> None:
+    """Only "Sensors do not exist" means no sensors; any other 404 is a fault."""
+    mock_librenms.fail("sensors", **failure)
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.librenms"):
+        await setup_integration(hass, mock_config_entry)
+
+    assert mock_config_entry.runtime_data.data.sensors_available is False
+    warnings = [
+        r for r in caplog.records if "health sensors are unavailable" in r.message
+    ]
+    assert len(warnings) == 1
+    diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+    assert diagnostics["sensors"]["available"] is False
