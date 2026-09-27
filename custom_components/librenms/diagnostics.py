@@ -146,12 +146,16 @@ async def async_get_config_entry_diagnostics(
             "alerts_active": len(data.alerts),
             "alerts_critical": data.alerts_critical,
             "alerts_warning": data.alerts_warning,
+            "alerts_critical_hidden": data.alerts_critical_hidden,
         },
         "devices": [
             _device(device, len(data.alerts_by_device.get(device.device_id, [])))
             for device in data.devices.values()
         ],
         "alerts": [_alert(alert) for alert in data.alerts],
+        # Open critical alerts on devices missing from the latest list, in
+        # the same allowlisted form; the problem sensor names their devices.
+        "hidden_alerts": [_alert(alert) for alert in data.hidden_alerts],
         "sensors": _sensors(data),
         "poller": {
             "poller_stale": data.poller_stale,

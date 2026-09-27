@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import MAX_ALERT_ATTRIBUTES
 from .coordinator import LibreNMSConfigEntry, LibreNMSDataUpdateCoordinator
 from .entity import LibreNMSDeviceEntity, LibreNMSEntity, async_setup_device_entities
 
@@ -74,6 +75,21 @@ class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
             # latest device list left out. Not in alerts_critical, which
             # follows the visible devices, but still a problem.
             "alerts_critical_hidden": data.alerts_critical_hidden,
+            # Which alerts those are, newest first, capped like the alert
+            # list on the active alerts sensor. The count above is the
+            # total.
+            "hidden_alerts": [
+                {
+                    "id": alert.alert_id,
+                    "device_id": alert.device_id,
+                    "device": data.hidden_device_names.get(alert.device_id),
+                    "hostname": alert.hostname,
+                    "rule": alert.rule_name,
+                    "severity": alert.severity,
+                    "acknowledged": alert.acknowledged,
+                }
+                for alert in data.hidden_alerts[:MAX_ALERT_ATTRIBUTES]
+            ],
             "poller_stale": data.poller_stale,
             # Device names as shown in Home Assistant. `down_hostnames` keeps
             # its original contents (often IP addresses) so existing

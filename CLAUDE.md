@@ -76,7 +76,8 @@ counting. Before v0.3.1 startup used this rule and later updates used
    and returning fires nothing.
 2. **The problem sensor follows open alerts that count.** An open critical
    alert on a device that is registered but missing from the list keeps
-   `has_problem` true (`alerts_critical_hidden`).
+   `has_problem` true (`alerts_critical_hidden`, listed in the problem
+   sensor's `hidden_alerts` and, by id only, in diagnostics).
    Counts still follow the visible devices, as the round-1 Global Read fix
    intended.
 3. **An unexpected empty list fails the update.** Devices are expected when

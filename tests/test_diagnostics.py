@@ -207,7 +207,9 @@ async def test_diagnostics_keep_useful_context(
         "alerts_active": 2,
         "alerts_critical": 1,
         "alerts_warning": 1,
+        "alerts_critical_hidden": 0,
     }
+    assert diagnostics["hidden_alerts"] == []
     assert len(diagnostics["devices"]) == 4
     core = diagnostics["devices"][0]
     assert core == {
@@ -318,3 +320,42 @@ async def test_diagnostics_include_poller_health(
     assert poller["poller_stale"] is True
     assert poller["last_advanced"] == "2025-07-28 09:14:03"
     assert poller["stalled_for_seconds"] >= 900
+
+
+async def test_diagnostics_list_hidden_alerts_without_names(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA round 3, F5: a hidden critical alert shows up by id only.
+
+    Device 2 drops out of the list while its critical alert stays open.
+    Diagnostics count it and list its ids, but its device name, hostname
+    and rule name stay out like every other name.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+
+    assert diagnostics["counts"]["alerts_critical_hidden"] == 1
+    assert diagnostics["hidden_alerts"] == [
+        {
+            "id": 101,
+            "device_id": 2,
+            "rule_id": 7,
+            "severity": "critical",
+            "state": 1,
+            "acknowledged": False,
+            "timestamp": "2025-07-28 09:12:00",
+        }
+    ]
+    serialized = _serialize(diagnostics)
+    leaked = [value for value in _sensitive_values() if value in serialized]
+    assert leaked == []
+    assert "ap-garage" not in serialized
+    assert "Device down due to no ICMP response" not in serialized

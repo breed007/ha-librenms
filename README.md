@@ -301,7 +301,7 @@ is no need to delete and re-add it, which would lose that history.
 | `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts on devices Home Assistant has that are missing from the latest device list; see [Alert events](#alert-events)), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts on devices Home Assistant has that are missing from the latest device list; see [Alert events](#alert-events)), `hidden_alerts` (those alerts, newest first and capped at 50, each with its id, device name, hostname, rule, severity and `acknowledged`), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
 | `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling. See below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
@@ -421,10 +421,10 @@ De-duplication rules:
 - Events follow LibreNMS's list of open alerts, not the device list. A device
   that drops out of one response and comes back fires nothing, because its
   alerts never cleared.
-- Only alerts on devices Home Assistant has count: the devices in the latest
-  device list, plus any it added on an earlier update that the latest list
-  left out. An alert on a device the token has never listed fires nothing,
-  and counts from the update where that device first appears.
+- An alert counts only if its device is in Home Assistant: either in the
+  latest device list, or added on an earlier update and left out of the
+  latest one. An alert on a device the token has never listed fires nothing
+  until that device appears.
 - If the device list comes back empty while Home Assistant already knows
   devices for the integration, including right after a restart or reload,
   the update counts as failed and entities go unavailable rather than
@@ -586,6 +586,18 @@ and deleting it would throw away any renaming or settings you gave it. To
 tidy up, reload the integration (or restart Home Assistant), delete the old
 entity from its settings, then rename the new entity to the old entity id so
 automations and dashboards keep working.
+
+**The problem sensor is on, but no device is down and no critical alert is
+listed**: look at the problem sensor's attributes. If `poller_stale` is
+true, see "Detecting a stalled poller" above. If `alerts_critical_hidden` is
+above 0, LibreNMS has open critical alerts on devices that Home Assistant
+has but the latest device list left out, and `hidden_alerts` names them. A
+device usually drops out of the list because the token's LibreNMS user can
+no longer see it, for example after a change to its role or to a device
+group. Restore that access (Global Read sees every device) and the device
+returns on the next update. If the device has left the token's view for
+good, delete it from its device page in Home Assistant, and its alerts stop
+counting.
 
 **Entities go unavailable during a LibreNMS restart**: expected. The
 coordinator retries with backoff and entities come back on the next successful

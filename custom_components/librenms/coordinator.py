@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -333,6 +333,10 @@ class LibreNMSData:
     # sensor on: a device dropping out of a response is not the fault
     # clearing.
     alerts_critical_hidden: int = 0
+    # Those alerts themselves, newest first, and the Home Assistant name of
+    # each one's device, so the problem sensor can say what is holding it on.
+    hidden_alerts: list[LibreNMSAlert] = field(default_factory=list)
+    hidden_device_names: dict[int, str | None] = field(default_factory=dict)
 
     @property
     def has_problem(self) -> bool:
@@ -577,16 +581,18 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         else:
             counts.pop(self.config_entry.entry_id, None)
 
-    def _registered_device_ids(self) -> set[int]:
-        """Return the LibreNMS ids of devices registered for this entry.
+    def _registered_devices(self) -> dict[int, str | None]:
+        """Return the devices registered for this entry, with their names.
 
         These are the devices the user has been shown at some point and has
-        not deleted, whether or not the latest device list includes them.
-        The registry indexes devices by config entry, so this costs well
-        under a millisecond per update even with a few thousand devices.
+        not deleted, whether or not the latest device list includes them,
+        keyed by LibreNMS id. The name is the one Home Assistant shows,
+        including a rename by the user. The registry indexes devices by
+        config entry, so this costs well under a millisecond per update even
+        with a few thousand devices.
         """
         prefix = f"{self.config_entry.entry_id}_"
-        ids: set[int] = set()
+        devices: dict[int, str | None] = {}
         for device in dr.async_entries_for_config_entry(
             dr.async_get(self.hass), self.config_entry.entry_id
         ):
@@ -594,8 +600,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 if domain == DOMAIN and identifier.startswith(prefix):
                     device_id = _as_int(identifier.removeprefix(prefix))
                     if device_id is not None:
-                        ids.add(device_id)
-        return ids
+                        devices[device_id] = device.name_by_user or device.name
+        return devices
 
     @callback
     def async_add_device_removed_listener(
@@ -621,8 +627,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         for listener in list(self._device_removed_listeners):
             listener(device_id)
 
-    def _devices_in_home_assistant(self, data: LibreNMSData) -> set[int]:
-        """Return the devices whose alerts count, for this update.
+    def _devices_in_home_assistant(self, data: LibreNMSData) -> dict[int, str | None]:
+        """Return the devices whose alerts count, for this update, by name.
 
         That is every device in this update's list, plus every device
         registered for this entry from an earlier one, even if LibreNMS
@@ -638,7 +644,10 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         Assistant takes it out of the registry, which is how the user stops
         a device that left the token's view for good from counting.
         """
-        return set(data.devices) | self._registered_device_ids()
+        return {
+            **{device_id: device.name for device_id, device in data.devices.items()},
+            **self._registered_devices(),
+        }
 
     def _expects_devices(self) -> bool:
         """Return True if an empty device list would contradict what HA knows.
@@ -651,7 +660,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         """
         if self.data is not None:
             return bool(self.data.devices)
-        return bool(self._registered_device_ids())
+        return bool(self._registered_devices())
 
     def _check_empty_device_list(self, raw_devices: list[dict[str, Any]]) -> None:
         """Fail the update when /devices comes back empty unexpectedly.
@@ -837,13 +846,23 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 if alert_id in self._known_alerts:
                     self._alert_records[alert_id] = alert
 
-        data.alerts_critical_hidden = sum(
-            1
-            for alert_id, alert in current.items()
-            if alert_id not in visible
-            and alert.device_id in in_home_assistant
-            and alert.severity == SEVERITY_CRITICAL
+        data.hidden_alerts = sorted(
+            (
+                alert
+                for alert_id, alert in current.items()
+                if alert_id not in visible
+                and alert.device_id in in_home_assistant
+                and alert.severity == SEVERITY_CRITICAL
+            ),
+            key=lambda alert: alert.timestamp or "",
+            reverse=True,
         )
+        data.hidden_device_names = {
+            alert.device_id: in_home_assistant[alert.device_id]
+            for alert in data.hidden_alerts
+            if alert.device_id is not None
+        }
+        data.alerts_critical_hidden = len(data.hidden_alerts)
 
         for alert in data.new_alerts:
             self._fire_alert_event(alert, alert.severity)

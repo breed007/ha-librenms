@@ -21,7 +21,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -36,12 +36,14 @@ from custom_components.librenms.const import (
     DOMAIN,
     EMPTY_DEVICE_POLLS,
     EVENT_ALERT,
+    MAX_ALERT_ATTRIBUTES,
 )
 
 from .conftest import (
     MockLibreNMS,
     async_poll,
     get_device,
+    load_fixture_json,
     remove_device,
     setup_integration,
 )
@@ -427,6 +429,84 @@ async def test_seen_alert_survives_an_options_save_while_hidden(
     state = hass.states.get(PROBLEM)
     assert state.state == "on"
     assert state.attributes["alerts_critical_hidden"] == 1
+
+
+async def test_problem_sensor_names_the_hidden_alerts(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA round 3, F5: a hidden alert holding the sensor on is named.
+
+    The count alone left the user with the problem sensor on and nothing in
+    Home Assistant saying which alert or device. The device is named as
+    Home Assistant shows it, so a rename by the user carries through.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+
+    state = hass.states.get(PROBLEM)
+    assert state.state == "on"
+    assert state.attributes["alerts_critical_hidden"] == 1
+    assert state.attributes["hidden_alerts"] == [
+        {
+            "id": 101,
+            "device_id": 2,
+            "device": "Garage AP",
+            "hostname": "ap-garage.lan.example",
+            "rule": "Device down due to no ICMP response",
+            "severity": "critical",
+            "acknowledged": False,
+        }
+    ]
+
+    dr.async_get(hass).async_update_device(
+        get_device(hass, mock_config_entry, 2).id, name_by_user="Garage access point"
+    )
+    await async_poll(hass, freezer)
+    [hidden] = hass.states.get(PROBLEM).attributes["hidden_alerts"]
+    assert hidden["device"] == "Garage access point"
+
+    mock_librenms.devices = load_fixture_json("devices.json")
+    await async_poll(hass, freezer)
+    state = hass.states.get(PROBLEM)
+    assert state.attributes["alerts_critical_hidden"] == 0
+    assert state.attributes["hidden_alerts"] == []
+
+
+async def test_hidden_alert_list_is_capped_newest_first(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The attribute stays bounded for the recorder; the count stays exact."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    mock_librenms.set_alerts(
+        [
+            {
+                **ALERT_101,
+                "id": str(1000 + minute),
+                "timestamp": f"2025-07-28 10:{minute:02d}:00",
+            }
+            for minute in range(MAX_ALERT_ATTRIBUTES + 10)
+        ]
+    )
+    await async_poll(hass, freezer)
+
+    state = hass.states.get(PROBLEM)
+    assert state.attributes["alerts_critical_hidden"] == MAX_ALERT_ATTRIBUTES + 10
+    hidden = state.attributes["hidden_alerts"]
+    assert len(hidden) == MAX_ALERT_ATTRIBUTES
+    assert hidden[0]["id"] == 1000 + MAX_ALERT_ATTRIBUTES + 9
+    assert hidden[-1]["id"] == 1010
 
 
 @pytest.mark.parametrize("reload", [False, True], ids=["no_reload", "reload"])
