@@ -49,10 +49,12 @@ Setup is a URL and an API token. No YAML.
 
 ### Supported LibreNMS versions
 
-Verified against LibreNMS **26.8** on a 22-device install. The four endpoints
-this integration uses (`/api/v0/system`, `/api/v0/devices`, `/api/v0/alerts`
-and `/api/v0/resources/sensors`) have been stable across the lifetime of the
-v0 API, so older releases will very likely work.
+Version 0.2.0 ran against a live 22-device install of LibreNMS **26.8**. The
+changes in 0.3.0 were checked against LibreNMS's source code and this
+project's test suite, not against a live instance. The four endpoints this
+integration uses (`/api/v0/system`, `/api/v0/devices`, `/api/v0/alerts` and
+`/api/v0/resources/sensors`) have been stable across the lifetime of the v0
+API, so older releases will very likely work.
 
 A hard minimum version has not been pinned. If you hit a problem on an older
 release, please open an issue with your LibreNMS version so it can be
@@ -85,15 +87,17 @@ which is what this integration needs.
 
 Two roles to avoid:
 
-- **Normal User** sees only the devices explicitly assigned to it, which on
-  most installs is none. The integration would then show no devices at all.
+- **Normal User** sees only the devices assigned to it, directly or through
+  a device group, which on most installs is none. The integration would then
+  show no devices at all.
 - **Admin** works, but this integration never writes to LibreNMS, and an admin
   token in a leaked Home Assistant backup is admin access to your monitoring
   system.
 
-LibreNMS returns alerts for every device regardless of role, so alerts on
-devices the token cannot see are ignored and logged once. That keeps the
-alert counts consistent with the devices Home Assistant shows.
+The LibreNMS API returns alerts for every device, whichever devices the
+token's role can see. Alerts on devices the token cannot see are therefore
+ignored and logged once, which keeps the alert counts consistent with the
+devices Home Assistant shows.
 
 1. In LibreNMS, go to **Settings → Manage → Users → Add User**.
 2. Create a user (for example `homeassistant`) with the **Global Read** role.
@@ -116,13 +120,13 @@ and asks for a new one. The URL does not need re-entering.
 
 ### What the token gives access to
 
-- **The token can read every SNMP credential LibreNMS stores.** LibreNMS's
-  device API returns each device's SNMP community string and SNMPv3
-  authentication and privacy passwords, in plain text, to any token that can
-  list devices. That includes a Global Read token; there is no role that can
-  see devices without also seeing their credentials. This integration uses
-  none of those fields and does not keep them after each poll, but anyone who
-  gets hold of the token can read them all.
+- **The token can read the SNMP credentials of every device it can see.**
+  With Global Read, that is every device. LibreNMS's device API returns each
+  device's SNMP community string and SNMPv3 authentication and privacy
+  passwords in plain text, and no LibreNMS role can list devices through the
+  API without also receiving them, Global Read included. This integration
+  uses none of those fields and does not keep them after each poll, but
+  anyone who gets hold of the token can read them.
 - **Home Assistant backups contain the token.** It is stored with the
   integration's configuration, so every backup includes it. Treat those
   backups as if they held your SNMP credentials. If one is exposed, delete the

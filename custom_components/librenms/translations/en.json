@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to LibreNMS",
-        "description": "Enter the URL of your LibreNMS instance and an API token. Create the token in LibreNMS under Settings → API → API Access, for a dedicated user with the Global Read role. A Normal User only sees devices explicitly assigned to it, which is usually none.",
+        "description": "Enter the URL of your LibreNMS instance and an API token. Create the token in LibreNMS under Settings → API → API Access, for a dedicated user with the Global Read role. A Normal User only sees devices assigned to it directly or through a device group, which is usually none.",
         "data": {
           "url": "URL",
           "api_token": "API token",

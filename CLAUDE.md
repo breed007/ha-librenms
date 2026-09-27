@@ -10,7 +10,8 @@ section before touching anything that parses an API response.
 polls a LibreNMS instance over its REST API (`/api/v0`) and exposes devices,
 alerts and health sensors. Read-only; it never writes to LibreNMS. Public repo
 at github.com/breed007/ha-librenms, MIT, installed through HACS as a custom
-repository.
+repository. Minimum Home Assistant is 2026.8.0 (`hacs.json`, README
+Requirements, and the floor row in the CI matrix must all agree).
 
 ## Architecture
 
@@ -69,9 +70,12 @@ same filtering LibreNMS does.**
   so ask for all five or acknowledged alerts look recovered.
 - **`/alerts` has no per-device permission filter; `/devices` and
   `/resources/sensors` do** (`hasDeviceAccess`). Only admin and Global Read see
-  every device. A Normal User sees only devices assigned to it, usually none.
+  every device. A Normal User sees only devices assigned to it directly or
+  through a device group (static groups only, unless
+  `permission.device_group.allow_dynamic` is set), usually none.
   Alerts on devices not in the device list are dropped.
-- **`/devices` returns SNMP secrets** to any token that can list devices:
+- **`/devices` returns SNMP secrets** for every device the token can see, to
+  any role that can list devices through the API:
   `community`, `authname`, `authpass`, `cryptopass`, plus `sysContact`,
   `sysDescr`, `snmpEngineID`, `dependency_parent_hostname` and more. Never keep
   the raw payload and never put a raw payload in diagnostics.
