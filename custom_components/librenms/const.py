@@ -77,6 +77,9 @@ UPTIME_DRIFT_TOLERANCE: Final = 60
 # the token's view of it, really is empty.
 EMPTY_DEVICE_LIST_CONFIRMATIONS: Final = 3
 
+# hass.data[DOMAIN] key for the per-entry run of untrusted empty lists.
+EMPTY_DEVICE_POLLS: Final = "empty_device_polls"
+
 # Report the poller as stuck once the newest `last_polled` across the whole
 # fleet has not advanced for this long. LibreNMS polls devices every 300s by
 # default, so this allows three full cycles before crying wolf.

@@ -174,7 +174,7 @@ is no need to delete and re-add it, which would lose that history.
 | `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `alerts_critical_hidden` (open critical alerts you were already shown whose device is missing from the latest device list), `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
 | `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling. See below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
@@ -295,9 +295,15 @@ De-duplication rules:
   that drops out of one response and comes back fires nothing, because its
   alerts never cleared. An alert on a device the token cannot see fires
   nothing until that device becomes visible.
-- If the device list suddenly comes back empty, the update counts as failed
-  and entities go unavailable rather than reporting an all-clear. An empty
-  list that repeats for three updates in a row is accepted as real.
+- If the device list comes back empty while Home Assistant already knows
+  devices for the integration, including right after a restart or reload,
+  the update counts as failed and entities go unavailable rather than
+  reporting an all-clear. Three empty lists in a row, with nothing else in
+  between, are accepted as real.
+- A critical alert you have already been shown keeps
+  `binary_sensor.librenms_problem` on until LibreNMS clears it, even if its
+  device drops out of the device list. The problem sensor's
+  `alerts_critical_hidden` attribute counts these alerts.
 
 ### Acknowledged alerts
 

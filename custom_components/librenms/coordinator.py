@@ -11,7 +11,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_VERIFY_SSL,
     DOMAIN,
     EMPTY_DEVICE_LIST_CONFIRMATIONS,
+    EMPTY_DEVICE_POLLS,
     EVENT_ALERT,
     EVENT_TYPE_RECOVERED,
     IGNORED_SENSOR_CLASSES,
@@ -325,6 +326,12 @@ class LibreNMSData:
     poller_stale: bool
     poller_last_advanced: str | None
     poller_stalled_for: float
+    # Critical alerts the user has already been shown that LibreNMS still
+    # lists as open, but whose device was missing from this poll's device
+    # list. They are not in the counts, which follow the visible devices,
+    # but they keep the problem sensor on: a device dropping out of a
+    # response is not the fault clearing.
+    alerts_critical_hidden: int = 0
 
     @property
     def has_problem(self) -> bool:
@@ -333,7 +340,12 @@ class LibreNMSData:
         A stuck poller counts. Without it every other signal here reads as
         healthy precisely when nothing is being measured.
         """
-        return self.devices_down > 0 or self.alerts_critical > 0 or self.poller_stale
+        return (
+            self.devices_down > 0
+            or self.alerts_critical > 0
+            or self.alerts_critical_hidden > 0
+            or self.poller_stale
+        )
 
 
 class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
@@ -373,9 +385,6 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._shown_alerts: set[int] = set()
         self._alert_records: dict[int, LibreNMSAlert] = {}
         self._primed = False
-        # Consecutive polls where /devices came back empty after a poll that
-        # had devices. See _check_empty_device_list.
-        self._empty_device_polls = 0
         self._warned_large_install = False
         self._warned_implausible = False
         self._warned_hidden_alerts = False
@@ -429,6 +438,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             return_exceptions=True,
         )
         core = (raw_devices, raw_alerts)
+        if any(isinstance(result, BaseException) for result in core):
+            # Only empty lists with nothing else in between count as a run.
+            self._empty_device_polls = 0
         # A rejected token outranks everything else in the same poll, so a
         # 401 on one request starts reauth even if the other got a 403.
         for result in core:
@@ -539,36 +551,75 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         self._resolve_alert_deltas(data, open_alerts)
         return data
 
-    def _check_empty_device_list(self, raw_devices: list[dict[str, Any]]) -> None:
-        """Fail the update when /devices suddenly comes back empty.
+    @property
+    def _empty_device_polls(self) -> int:
+        """Return how many empty device lists in a row were not trusted.
 
-        One empty list right after a poll that had devices is far more
-        likely to be a fault (a permission cache being rebuilt, a database
-        hiccup) than an instance emptied between two polls. Publishing it
-        would report every device gone and every problem cleared at once, so
-        it counts as a failed update and entities go unavailable instead.
-        It is only a suspicion, though: a list that stays empty for
-        EMPTY_DEVICE_LIST_CONFIRMATIONS polls in a row is accepted, so an
-        instance that really was emptied, or a role that really lost its
-        devices, cannot keep the integration failing forever. At startup
-        there is no earlier list to contradict, so an empty one is accepted.
+        Kept in hass.data rather than on the coordinator: Home Assistant
+        builds a new coordinator for every setup attempt, and a count that
+        restarted each time would keep a genuinely emptied instance from ever
+        finishing setup.
         """
-        previous = self.data
-        if raw_devices or previous is None or not previous.devices:
-            self._empty_device_polls = 0
-            return
-        self._empty_device_polls += 1
-        if self._empty_device_polls >= EMPTY_DEVICE_LIST_CONFIRMATIONS:
-            _LOGGER.warning(
-                "LibreNMS has returned no devices for %s polls in a row; "
-                "accepting that the API token can no longer see any devices",
-                self._empty_device_polls,
+        counts = self.hass.data.get(DOMAIN, {}).get(EMPTY_DEVICE_POLLS, {})
+        return counts.get(self.config_entry.entry_id, 0)
+
+    @_empty_device_polls.setter
+    def _empty_device_polls(self, value: int) -> None:
+        counts = self.hass.data.setdefault(DOMAIN, {}).setdefault(
+            EMPTY_DEVICE_POLLS, {}
+        )
+        if value:
+            counts[self.config_entry.entry_id] = value
+        else:
+            counts.pop(self.config_entry.entry_id, None)
+
+    def _expects_devices(self) -> bool:
+        """Return True if an empty device list would contradict what HA knows.
+
+        That is the case once this run has published devices, and before the
+        first successful update when the registry already holds devices for
+        this entry, which is what makes a reload or restart during a blip
+        safe. After an empty list has been accepted, nothing is expected
+        until devices come back.
+        """
+        if self.data is not None:
+            return bool(self.data.devices)
+        hub = (DOMAIN, self.config_entry.entry_id)
+        return any(
+            hub not in device.identifiers
+            for device in dr.async_entries_for_config_entry(
+                dr.async_get(self.hass), self.config_entry.entry_id
             )
+        )
+
+    def _check_empty_device_list(self, raw_devices: list[dict[str, Any]]) -> None:
+        """Fail the update when /devices comes back empty unexpectedly.
+
+        An empty list where devices are expected is far more likely to be a
+        fault (a permission cache being rebuilt, a database hiccup) than an
+        instance emptied since the last poll. Publishing it would report
+        every device gone at once, so the update fails and entities go
+        unavailable instead. It is a suspicion, not a verdict: after
+        EMPTY_DEVICE_LIST_CONFIRMATIONS empty lists in a row, with no other
+        result in between, the list is accepted, so an instance that really
+        was emptied, or a role that really lost its devices, settles.
+        """
+        if raw_devices or not self._expects_devices():
             self._empty_device_polls = 0
             return
+        count = self._empty_device_polls + 1
+        if count >= EMPTY_DEVICE_LIST_CONFIRMATIONS:
+            self._empty_device_polls = 0
+            _LOGGER.warning(
+                "LibreNMS has returned no devices for %s updates in a row; "
+                "accepting that the API token can no longer see any devices",
+                count,
+            )
+            return
+        self._empty_device_polls = count
         raise UpdateFailed(
-            f"LibreNMS returned no devices, where the previous poll had "
-            f"{len(previous.devices)}; treating this as a failed update"
+            "LibreNMS returned no devices, where devices were expected; "
+            "treating this as a failed update"
         )
 
     @property
@@ -645,13 +696,19 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         )
         now = dt_util.utcnow()
 
+        if marker is None:
+            # Nothing reports a poll time, so there is nothing to judge. That
+            # is not the poller moving either: keep the last marker, so a
+            # stretch without devices does not restart the stall timer.
+            data.poller_last_advanced = self._poll_marker
+            return
+
         if marker != self._poll_marker:
             self._poll_marker = marker
             self._poll_marker_moved = now
 
         data.poller_last_advanced = marker
-        if marker is None or self._poll_marker_moved is None:
-            # Nothing reports a poll time, so there is nothing to judge.
+        if self._poll_marker_moved is None:
             return
 
         data.poller_stalled_for = (now - self._poll_marker_moved).total_seconds()
@@ -703,6 +760,13 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         for alert in data.new_alerts:
             self._known_alerts[alert.alert_id] = alert.severity
         self._shown_alerts |= visible
+        data.alerts_critical_hidden = sum(
+            1
+            for alert_id, alert in current.items()
+            if alert_id in self._shown_alerts
+            and alert_id not in visible
+            and alert.severity == SEVERITY_CRITICAL
+        )
         for alert_id, alert in current.items():
             if alert_id in self._known_alerts:
                 self._alert_records[alert_id] = alert

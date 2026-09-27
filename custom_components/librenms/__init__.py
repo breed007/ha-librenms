@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 
-from .const import DOMAIN, ISSUE_INSUFFICIENT_PERMISSIONS
+from .const import DOMAIN, EMPTY_DEVICE_POLLS, ISSUE_INSUFFICIENT_PERMISSIONS
 from .coordinator import LibreNMSConfigEntry, LibreNMSDataUpdateCoordinator
 
 PLATFORMS: list[Platform] = [
@@ -55,8 +55,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) ->
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
-    """Drop any repair issue left behind by a removed entry."""
+    """Drop anything a removed entry left behind."""
     _delete_permission_issue(hass, entry)
+    hass.data.get(DOMAIN, {}).get(EMPTY_DEVICE_POLLS, {}).pop(entry.entry_id, None)
 
 
 def _delete_permission_issue(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:

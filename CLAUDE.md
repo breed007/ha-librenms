@@ -47,6 +47,36 @@ Entity unique ids are `{entry_id}_{key}` and `{entry_id}_{device_id}_{key}`,
 so they survive a URL change through the reconfigure flow but not a delete and
 re-add.
 
+### Trusting the device list
+
+`/devices` can come back empty or partial for reasons that have nothing to
+do with the network (a permission cache being rebuilt, a database hiccup, a
+role change). Three rules keep that from producing false events or a false
+all-clear, and they are deliberately independent of each other:
+
+1. **Alert events follow `/alerts`, never `/devices`.** The coordinator
+   tracks alerts it has accounted for (`_known_alerts`), which the user has
+   seen (`_shown_alerts`) and their last record. `new` fires only for a
+   visible alert; `recovered` only when LibreNMS stops listing a shown alert
+   as open. A device leaving the list and returning fires nothing.
+2. **The problem sensor follows open alerts the user has seen.** A shown
+   critical alert that is still open keeps `has_problem` true even when its
+   device is missing from the list (`alerts_critical_hidden`). Counts still
+   follow the visible devices, as the round-1 Global Read fix intended.
+   Alerts on devices the token never saw count for nothing.
+3. **An unexpected empty list fails the update.** Devices are expected when
+   the last published update had some, or, before the first success, when
+   the device registry holds devices for the entry (so a reload or restart
+   during a blip is covered). Such an empty list raises UpdateFailed. The
+   run of them is counted in `hass.data[DOMAIN]["empty_device_polls"]`,
+   because a new coordinator is built for every setup attempt; any other
+   result resets it. The third in a row is accepted, after which nothing is
+   expected until devices return. Because of rule 2, accepting an empty list
+   never clears a fault LibreNMS still has open.
+
+A missing `last_polled` (no devices to read it from) is "nothing to judge"
+for the stale-poller check, never "the poller moved".
+
 ### Errors
 
 | HTTP | Exception | Effect |
