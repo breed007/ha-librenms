@@ -163,6 +163,16 @@ same filtering LibreNMS does.**
     `*.view`/`viewAll`/`viewAny`), and the seeded roles carry no permissions.
   - Disabling a user stops its tokens from 26.8.0 (checked in 26.8.0 and
     26.9.x) but not at 26.4.0, so don't document that as a revocation step.
+  - LDAP and Active Directory (checked at 26.4.0, 26.8.0, 26.9.1.1):
+    only the configured authorizer signs anyone in, so a local account
+    cannot, and every sign-in resets a directory account's roles from its
+    groups (`LegacyUserProvider::retrieveByCredentials` calls `syncRoles`).
+    The token page path therefore needs mysql auth. The 26.9.0+ CLI path
+    does not: the v0 middleware is `EnforceJson` plus `auth:sanctum` only,
+    `user:add` makes a mysql-type user, and `api:token-create` looks the
+    user up by username alone (`user:add` checks uniqueness among mysql
+    users only, so a same-named directory user makes that ambiguous).
+    Pre-26.4 (admin picker) under directory auth is unverified.
 - **Redirects:** aiohttp strips `Authorization` and cookies on a cross-origin
   redirect but not `X-Auth-Token`. Requests use `allow_redirects=False`.
 

@@ -112,6 +112,11 @@ depend on your LibreNMS version. The version is shown on the About page
 | 26.4.0 to 26.8.x | [On the token page](#on-the-token-page-librenms-2640-or-later) |
 | Older than 26.4.0 | [As an admin](#as-an-admin-librenms-older-than-2640) |
 
+On 26.4.0 or later, if LibreNMS signs users in through LDAP or Active
+Directory, use the server method, which needs 26.9.0 or later. The token
+page only works with LibreNMS's own user database; see the note at the end
+of that section.
+
 The steps name pages by their address, such as `/users`: add it to the
 address of your LibreNMS, as in `https://librenms.example.com/users`.
 Menu labels have changed between versions; these addresses have not.
@@ -174,6 +179,14 @@ Do not use this command on LibreNMS 26.8.x. It exists there, but the token it
 creates is for LibreNMS's newer API, and the API this integration uses only
 accepts that kind of token from 26.9.0 on.
 
+This is also the method to use if LibreNMS signs users in through LDAP or
+Active Directory. The account never signs in, and LibreNMS's API does not
+check how an account signs in, only its token and role. On those installs
+`lnms user:add` warns that the account cannot sign in; that is expected.
+Pick a username that no directory account uses: `api:token-create` looks the
+account up by name alone, so it could otherwise create the token for the
+directory account instead.
+
 #### On the token page (LibreNMS 26.4.0 or later)
 
 From 26.4.0 the token page, `/api-access`, only creates tokens for the account
@@ -196,6 +209,16 @@ open it. Global Read does not include that permission, so give it to the
 4. Copy the token. It is shown only once.
 5. Sign back in as an admin and remove the `api-tokens` role from
    `homeassistant`. The token keeps working.
+
+This method only works if LibreNMS uses its own user database, because
+`homeassistant` has to sign in to create its token. When LibreNMS signs
+users in through LDAP or Active Directory, a local account cannot sign in at
+all. A directory account can, but LibreNMS resets its roles from its
+directory groups every time it signs in, so the `api-tokens` role from step
+2 is gone by step 3. On 26.9.0 and later, create the token
+[on the server](#on-the-server-librenms-2690-or-later) instead. On 26.4.0 to
+26.8.x this guide has no tested method for those installs; upgrade LibreNMS
+to 26.9.0 or later first.
 
 About the **API Access** permission: LibreNMS describes it as "Access the
 LibreNMS REST API", but in LibreNMS's source code (checked at 26.4.0, 26.8.0
