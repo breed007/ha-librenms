@@ -146,13 +146,14 @@ docker compose exec librenms lnms user:add --role=global-read homeassistant
 
 Here `librenms` is the name of the LibreNMS service in your compose file.
 
-The command then opens a short form. The username and the `global-read`
-role are already filled in, so press Enter to accept them. Type a long random
-password, because the account can see every device, then press Enter through
-the email, full name and description, which can stay empty. LibreNMS rejects
-passwords shorter than 8 characters and, by default, passwords that appear in
-known data breaches. The form needs a terminal, so it fails if you pipe input
-into the command.
+The command then opens a short form that asks, in order, for the username,
+password, roles, email, full name and description. Press Enter to accept the
+username, then type a long random password, because the account can see
+every device. Press Enter to keep the `global-read` role, which is already
+selected, then press Enter through the email, full name and description,
+which can stay empty. LibreNMS rejects passwords shorter than 8 characters
+and, by default, passwords that appear in known data breaches. The form
+needs a terminal, so it fails if you pipe input into the command.
 
 The command creates a local LibreNMS account, which can only sign in to the
 web interface if LibreNMS uses its own user database. If you create the
@@ -163,6 +164,9 @@ and let the command set a random password that is never shown:
 ```bash
 lnms user:add --role=global-read --password="$(openssl rand -base64 24)" homeassistant
 ```
+
+On a shared server, use the form instead: while this command runs, other
+users on the machine can see the password in its process list.
 
 With the Docker image, put `docker compose exec librenms` in front as
 before. The `$(openssl ...)` part runs on the machine where you type the
@@ -389,10 +393,14 @@ Two things are handled that the raw API does not make obvious:
   limits stay perfectly sane. A reading counts as impossible when it is
   outside what its kind of sensor can report, or when the value the device
   sent, before LibreNMS scaled it, is at the very top of the 32-bit range.
-  Frequencies are in Hz and have no fixed limit, because CPU clocks and
-  radio links run into the gigahertz. Those entities go unavailable and
-  recover on their own if the reading comes back, and the integration logs a
-  one-time warning saying how many were affected.
+  Frequencies are in Hz and, because CPU clocks and radio links run into the
+  gigahertz, are held only to the general limit that applies to every
+  sensor (10^12 either way). Power factor can be on a -1 to 1 or a 0 to 100
+  scale, depending on the device, and UPS load can pass 100 percent in
+  overload; both are shown as LibreNMS reports them, never rescaled. Those
+  entities go unavailable and recover on their own if the reading comes
+  back. The integration logs a warning saying how many were affected, once
+  each time it starts, so it appears again after a reload or restart.
 
 If the sensors request fails (a timeout, an error from LibreNMS, a role that
 cannot read sensors), only the health sensors go unavailable. Device status,
@@ -484,7 +492,11 @@ De-duplication rules:
   `alerts_critical_hidden` attribute counts these alerts. If a device has
   left the token's view for good, delete it from its device page in Home
   Assistant; its alerts then stop counting. If LibreNMS lists that device
-  again later, it comes back with its entities on the next update.
+  again later, it comes back with its entities on the next update. If an
+  alert that already fired `critical` clears while its device is deleted,
+  no `recovered` event follows, so a notification raised on `critical`, such
+  as the one in "Flash the lights on a critical alert" below, has to be
+  dismissed by hand.
 
 ### Acknowledged alerts
 
