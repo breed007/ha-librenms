@@ -21,7 +21,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -32,6 +32,7 @@ from custom_components.librenms import async_remove_config_entry_device
 from custom_components.librenms.const import (
     CONF_INCLUDE_DISABLED,
     CONF_SCAN_INTERVAL,
+    CONF_URL,
     DOMAIN,
     EMPTY_DEVICE_POLLS,
     EVENT_ALERT,
@@ -497,3 +498,66 @@ async def test_empty_list_does_not_invent_a_stalled_poller(
         await async_poll(hass, freezer)
 
     assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+
+
+def _devices_state(hass: HomeAssistant, entry: MockConfigEntry) -> str:
+    """Return the device-count sensor state for one entry."""
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_devices_total"
+    )
+    assert entity_id is not None
+    return hass.states.get(entity_id).state
+
+
+async def test_empty_list_count_is_kept_per_entry(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Two instances each need three empty lists of their own (QA round 3, F3).
+
+    Both entries see the same empty lists here. A count shared between them
+    would reach three on the second poll and accept one entry early.
+    """
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        title="https://nms2.example.com",
+        unique_id="https://nms2.example.com",
+        data={**mock_config_entry.data, CONF_URL: "https://nms2.example.com"},
+        options=dict(mock_config_entry.options),
+    )
+    await setup_integration(hass, mock_config_entry)
+    await setup_integration(hass, other)
+    mock_librenms.set_devices([])
+
+    for _ in range(2):
+        await async_poll(hass, freezer)
+        assert _devices_state(hass, mock_config_entry) == STATE_UNAVAILABLE
+        assert _devices_state(hass, other) == STATE_UNAVAILABLE
+
+    await async_poll(hass, freezer)
+    assert _devices_state(hass, mock_config_entry) == "0"
+    assert _devices_state(hass, other) == "0"
+
+
+async def test_empty_list_count_is_removed_with_the_entry(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The count survives an unload (reloads continue the run) but not removal."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices([])
+    await async_poll(hass, freezer)
+    counts = hass.data[DOMAIN][EMPTY_DEVICE_POLLS]
+    assert counts == {mock_config_entry.entry_id: 1}
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert counts == {mock_config_entry.entry_id: 1}
+
+    await hass.config_entries.async_remove(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.entry_id not in counts
