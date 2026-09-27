@@ -97,20 +97,90 @@ async def test_diagnostics_leak_nothing_sensitive(
     assert "Device down due to no ICMP response" not in serialized
 
 
+# Device fields the integration never parses. None of their values may be
+# held anywhere on the coordinator once a poll has been processed.
+NEVER_RETAINED_FIELDS = (
+    "community",
+    "authname",
+    "authpass",
+    "cryptopass",
+    "sysContact",
+    "sysDescr",
+    "snmpEngineID",
+    "dependency_parent_hostname",
+    "display_template",
+    "purpose",
+    "notes",
+)
+
+
+def _strings_held_by(root: object) -> list[str]:
+    """Return every string reachable from `root` through this integration.
+
+    Walks containers, dataclasses and any object whose class comes from
+    custom_components, so a payload stashed on the coordinator, the client
+    or anything they hold is found. Home Assistant's own objects (hass, the
+    config entry, the HTTP session) are not entered; they are not ours to
+    police, and hass reaches everything.
+    """
+    found: list[str] = []
+    seen: set[int] = set()
+    stack: list[object] = [root]
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, str):
+            found.append(obj)
+        elif isinstance(obj, bytes):
+            found.append(obj.decode("utf-8", "replace"))
+        elif isinstance(obj, dict):
+            stack.extend(obj.keys())
+            stack.extend(obj.values())
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(obj)
+        elif type(obj).__module__.startswith("custom_components.") or (
+            dataclasses.is_dataclass(obj) and not isinstance(obj, type)
+        ):
+            stack.extend(vars(obj).values() if hasattr(obj, "__dict__") else ())
+            for cls in type(obj).__mro__:
+                for slot in getattr(cls, "__slots__", ()):
+                    if hasattr(obj, slot):
+                        stack.append(getattr(obj, slot))
+    return found
+
+
 async def test_no_raw_payload_is_retained(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
     mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
-    """SNMP secrets are dropped at parse time, not kept for the life of HA."""
+    """SNMP secrets are dropped at parse time, not kept for the life of HA.
+
+    Searches everything reachable from the coordinator, not just its parsed
+    data, so a raw payload kept on the coordinator or the client is caught.
+    """
     await setup_integration(hass, mock_config_entry)
+    await async_poll(hass, freezer)
+    coordinator = mock_config_entry.runtime_data
 
     assert "raw" not in {f.name for f in dataclasses.fields(LibreNMSDevice)}
-    held = _serialize(dataclasses.asdict(mock_config_entry.runtime_data.data))
-    for secret_field in ("community", "authpass", "cryptopass", "authname"):
-        for device in load_fixture_json("devices.json")["devices"]:
-            if device.get(secret_field):
-                assert device[secret_field] not in held, secret_field
+    held = _strings_held_by(coordinator)
+    # The walk must actually reach the parsed data, or it proves nothing.
+    assert "core-sw01.lan.example" in held
+    assert "Device down due to no ICMP response" in held
+
+    secrets = [
+        str(device[field])
+        for device in load_fixture_json("devices.json")["devices"]
+        for field in NEVER_RETAINED_FIELDS
+        if device.get(field)
+    ]
+    assert secrets
+    leaked = [secret for secret in secrets if any(secret in text for text in held)]
+    assert leaked == []
 
 
 async def test_diagnostics_keep_useful_context(
