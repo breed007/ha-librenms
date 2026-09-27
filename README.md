@@ -4,8 +4,8 @@
 [![Validate](https://github.com/breed007/ha-librenms/actions/workflows/validate.yml/badge.svg)](https://github.com/breed007/ha-librenms/actions/workflows/validate.yml)
 [![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
 
-See your entire monitored network — device up/down, active alerts, health
-summary — inside Home Assistant, and automate on it.
+See your monitored network inside Home Assistant (device up/down, active
+alerts, health readings) and automate on it.
 
 This is a read-only integration against the [LibreNMS REST
 API](https://docs.librenms.org/API/). It polls your instance and turns every
@@ -35,7 +35,7 @@ and every device links back to its page there.
 
 ![A single monitored device showing its status, alert count and last boot time](docs/device.png)
 
-Setup is a URL and an API token — no YAML.
+Setup is a URL and an API token. No YAML.
 
 ![Adding the LibreNMS integration from the Home Assistant integrations dashboard](docs/add-integration.png)
 
@@ -49,14 +49,14 @@ Setup is a URL and an API token — no YAML.
 
 ### Supported LibreNMS versions
 
-Verified against LibreNMS **26.8** on a 22-device install. The three endpoints
-this integration uses — `/api/v0/system`, `/api/v0/devices` and
-`/api/v0/alerts` — have been stable across the lifetime of the v0 API, so
-older releases will very likely work.
+Verified against LibreNMS **26.8** on a 22-device install. The four endpoints
+this integration uses (`/api/v0/system`, `/api/v0/devices`, `/api/v0/alerts`
+and `/api/v0/resources/sensors`) have been stable across the lifetime of the
+v0 API, so older releases will very likely work.
 
 A hard minimum version has not been pinned. If you hit a problem on an older
 release, please open an issue with your LibreNMS version so it can be
-documented — that is the most useful thing an early user can report.
+documented. That is the most useful thing an early user can report.
 
 ---
 
@@ -116,8 +116,6 @@ and asks for a new one. The URL does not need re-entering.
 
 ### What the token gives access to
 
-Read this before you create the token.
-
 - **The token can read every SNMP credential LibreNMS stores.** LibreNMS's
   device API returns each device's SNMP community string and SNMPv3
   authentication and privacy passwords, in plain text, to any token that can
@@ -172,7 +170,7 @@ re-add it, which would lose that history.
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
 | `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
-| `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling — see below |
+| `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling. See below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 
 ### Per monitored device
@@ -187,26 +185,28 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 | `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and it only changes when the device reboots. Accurate to about one update interval |
 | `sensor.<device>_hardware` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_operating_system` | sensor | Diagnostic, disabled by default |
-| `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. Raw LibreNMS string — it has no time zone, so it is not exposed as a timestamp |
-| `sensor.<device>_<sensor>` | sensor | One per LibreNMS health sensor — see below |
+| `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. The raw LibreNMS string, which has no time zone, so it is not exposed as a timestamp |
+| `sensor.<device>_<sensor>` | sensor | One per LibreNMS health sensor. See below |
 
 Devices added in LibreNMS appear on the next poll without reloading the
 integration, and so do health sensors added to a device Home Assistant
-already knows (a new disk, or a sensor LibreNMS rediscovered under a new id). Devices removed from LibreNMS go unavailable, and can then be
-deleted from the Home Assistant device page.
+already knows (a new disk, or a sensor LibreNMS rediscovered under a new id).
+Devices removed from LibreNMS go unavailable, and can then be deleted from
+the Home Assistant device page.
 
 ### Health sensors
 
-LibreNMS already collects SNMP health readings — temperature, fan speed,
-voltage, current, power — and this exposes them as native Home Assistant
-sensors with the matching device classes, so you can automate on them
-directly. It costs one extra API call per poll regardless of fleet size,
-because LibreNMS returns every sensor in a single response.
+LibreNMS already collects SNMP health readings such as temperature, fan
+speed, voltage, current and power. The integration exposes them as native
+Home Assistant sensors with the matching device classes, so you can automate
+on them directly. It costs one extra API call per poll regardless of fleet
+size, because LibreNMS returns every sensor in a single response.
 
 **Only temperature is enabled by default.** Everything else is registered but
 switched off, so enabling a class is a per-entity toggle rather than a
 setup decision. On a 22-device install this produced 62 enabled entities out
-of 90 registered — worth knowing before you enable more on a large fleet.
+of 90 registered, which is worth knowing before you enable more on a large
+fleet.
 
 Two things are handled that the raw API does not make obvious:
 
@@ -214,7 +214,7 @@ Two things are handled that the raw API does not make obvious:
   though the payload also carries `sensor_divisor` and `sensor_multiplier`.
   Applying those again puts every voltage out by a factor of 1000.
 - **Impossible readings become unavailable rather than values.** Hardware that
-  cannot read a sensor tends to return a 32-bit sentinel instead of nothing —
+  cannot read a sensor tends to return a 32-bit sentinel instead of nothing:
   real instances report temperatures of 4294704 °C while the sensor's own
   limits stay perfectly sane. Those entities go unavailable and recover on
   their own if the reading comes back, and the integration logs a one-time
@@ -233,7 +233,7 @@ a bare `2` could mean healthy or failed.
 ### Detecting a stalled poller
 
 If LibreNMS's poller stops, every device keeps its last known state. Nothing
-goes down, no alerts fire, and the dashboard stays green — while nothing is
+goes down, no alerts fire, and the dashboard stays green while nothing is
 actually being checked. That is the failure mode `poller_stale` exists to
 catch, and it is why it also drives `binary_sensor.librenms_problem`.
 
@@ -244,9 +244,9 @@ comparison would need to guess the instance's zone and would be silently
 wrong if the guess were off. Progress is the thing that matters, and it can
 be checked without a clock at all.
 
-The sensor turns on when the newest poll time has not moved for 15 minutes —
-three full cycles at LibreNMS's default 300 s poll interval. Attributes report
-`last_advanced` and `stalled_for_seconds`.
+The sensor turns on when the newest poll time has not moved for 15 minutes,
+which is three full cycles at LibreNMS's default 300 s poll interval.
+Attributes report `last_advanced` and `stalled_for_seconds`.
 
 ---
 
@@ -397,9 +397,12 @@ automation:
 
 ## Troubleshooting
 
-**"Failed to connect"** — check that Home Assistant can reach the URL (a
+**"Failed to connect"**: check that Home Assistant can reach the URL (a
 LibreNMS instance behind a split-horizon DNS name is a common cause), and turn
 off *Verify SSL certificate* if the instance uses a self-signed certificate.
+If you entered only a host name or IP address, https was tried, and the
+message says so and shows the http address to enter if your instance only
+serves http.
 
 **"LibreNMS rejected the API token"**: LibreNMS answered 401. Confirm the
 token still exists under **Settings → API → API Access**, and that the user it
@@ -419,11 +422,11 @@ integration never follows redirects, because the API token would go along to
 whatever address the redirect names. If the address shown is your LibreNMS
 instance, enter that as the URL (or use **Reconfigure** on an existing entry).
 
-**Entities go unavailable during a LibreNMS restart** — expected. The
+**Entities go unavailable during a LibreNMS restart**: expected. The
 coordinator retries with backoff and entities come back on the next successful
 poll, with no user action needed.
 
-**Large installs** — the `/api/v0/devices` endpoint has no column filtering, so
+**Large installs**: the `/api/v0/devices` endpoint has no column filtering, so
 each poll returns full device rows. Above 500 devices the integration logs a
 one-time suggestion to raise the update interval. If you run an install that
 size, 300 s is a reasonable starting point.
@@ -431,17 +434,17 @@ size, 300 s is a reasonable starting point.
 To collect diagnostics: **Settings → Devices & Services → LibreNMS → ⋮ →
 Download diagnostics**. The file is built from a fixed list of fields that are
 safe to share, such as device ids, OS, model, software versions, up/down
-state, alert severities, health sensor readings by class, and whether the
-poller has stalled. Hostnames, device names, IP addresses, serial
-numbers, locations, SNMP settings and credentials, alert rule names, the
+state, alert severities, health sensor readings, and whether the poller has
+stalled. Hostnames, device names, IP addresses, serial numbers, locations,
+SNMP settings and credentials, alert rule names, sensor descriptions, the
 instance URL and the API token are never included.
 
 ---
 
 ## Not in this version
 
-- No write operations — acknowledging alerts, enabling/disabling devices and
-  device management are all out of scope for now.
+- No write operations. Acknowledging alerts, enabling or disabling devices
+  and device management are all out of scope for now.
 - No per-port entities. A 50-device install with 24-port switches would create
   over a thousand entities; port tracking is planned as an opt-in option.
 - No graphs. Grafana already does this well against the same data.
@@ -467,7 +470,7 @@ The test suite mocks the LibreNMS API with sanitized fixtures under
 The integration ships its own icon in `custom_components/librenms/brand/`.
 Since [Home Assistant 2026.3](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api)
 a custom integration provides brand images itself and they take priority over
-the brands CDN — no pull request against `home-assistant/brands` is involved,
+the brands CDN. No pull request against `home-assistant/brands` is involved,
 and that repository no longer accepts icons for custom integrations. On Home
 Assistant older than 2026.3 the directory is simply ignored and the default
 placeholder is shown.
@@ -488,7 +491,7 @@ Note the light/dark naming inverts between the two projects: LibreNMS names a
 file for the background it sits on, Home Assistant for the artwork itself. So
 HA's `logo.png` comes from LibreNMS's `_light` file.
 
-Rebuild after an upstream artwork change — sources are downloaded at build
+Rebuild after an upstream artwork change. Sources are downloaded at build
 time rather than vendored:
 
 ```bash
@@ -501,4 +504,4 @@ python3 -m venv /tmp/brandtools
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
