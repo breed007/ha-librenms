@@ -9,6 +9,7 @@ from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.librenms.coordinator import LibreNMSSensor
@@ -50,6 +51,152 @@ def test_sentinel_readings_are_rejected() -> None:
     assert sensor is not None
     assert sensor.value is None
     assert sensor.implausible is True
+
+
+# Rows shaped like LibreNMS 26.9 /resources/sensors output. The first two
+# are the CPU clocks of a Raspberry Pi as LibreNMS's agent extend reports
+# them (seen in a live lab). The rest are sensors from LibreNMS's own test
+# data (tests/data at 26.9.1.1): frequency is stored in Hz, microwave and
+# 60 GHz radios reach tens of GHz, and carrier offsets go negative.
+PI_ARM_CLOCK = {
+    "sensor_id": 101,
+    "device_id": 1,
+    "sensor_class": "frequency",
+    "sensor_type": "raspberry_freq",
+    "sensor_descr": "ARM",
+    "sensor_index": "6",
+    "sensor_current": 1500345728,
+    "sensor_limit": 1575363014.4,
+    "sensor_limit_low": 1425328441.6,
+    "sensor_divisor": 1,
+    "sensor_multiplier": 1,
+    "sensor_deleted": 0,
+    "poller_type": "snmp",
+}
+PI_CORE_CLOCK = {
+    **PI_ARM_CLOCK,
+    "sensor_id": 102,
+    "sensor_descr": "Core",
+    "sensor_index": "7",
+    "sensor_current": 500000992,
+    "sensor_limit": 525001041.6,
+    "sensor_limit_low": 475000942.4,
+}
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        (PI_ARM_CLOCK, 1500345728),
+        (PI_CORE_CLOCK, 500000992),
+        # tachyon: TACHYON-MIB::wirelessRadioFrequency, MHz x 1000000.
+        (
+            {
+                **PI_ARM_CLOCK,
+                "sensor_current": 66960000000,
+                "sensor_multiplier": 1000000,
+            },
+            66960000000,
+        ),
+        # timos_7750: tmnxCohOptPortRxFreqOffset, negative.
+        (
+            {**PI_ARM_CLOCK, "sensor_current": -73000000, "sensor_multiplier": 1000000},
+            -73000000,
+        ),
+        # apc: mains input frequency, divisor 10.
+        ({**PI_ARM_CLOCK, "sensor_current": 49.9, "sensor_divisor": 10}, 49.9),
+    ],
+    ids=["pi_arm", "pi_core", "radio_67ghz", "negative_offset", "mains"],
+)
+def test_real_frequencies_are_readings(row: dict[str, Any], expected: float) -> None:
+    """QA live lab, N-2: CPU clocks and radio frequencies are real values.
+
+    The old 1 MHz ceiling threw away every CPU clock and radio frequency,
+    and its lower bound of 0 threw away every negative offset.
+    """
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is False
+    assert sensor.value == expected
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        # uhp "Remote TTS": filed as frequency, raw 2^32 - 2145.
+        {**PI_ARM_CLOCK, "sensor_current": 4294965151},
+        # huaweiups_ups2000 runtime: 2^32 - 1 in a class with no own range.
+        {
+            **PI_ARM_CLOCK,
+            "sensor_class": "runtime",
+            "sensor_current": 4294967295,
+        },
+        # uhp "TX power level adjustment": 2^32 - 21 before a divisor of 10.
+        {
+            **PI_ARM_CLOCK,
+            "sensor_class": "dbm",
+            "sensor_current": 429496727.5,
+            "sensor_divisor": 10,
+        },
+        # The documented temperature case, raw 2^32 - 263200 over 1000.
+        {
+            **PI_ARM_CLOCK,
+            "sensor_class": "temperature",
+            "sensor_current": 4294704.096,
+            "sensor_divisor": 1000,
+        },
+    ],
+    ids=["frequency_wrap", "runtime_all_ones", "dbm_wrap_divided", "temp_wrap"],
+)
+def test_wrapped_32_bit_readings_are_rejected(row: dict[str, Any]) -> None:
+    """A raw value at the top of the 32-bit range is a sentinel in any class.
+
+    These are the sentinels found in LibreNMS's own test data. A range per
+    class cannot catch them all: 4294965151 Hz is a plausible radio
+    frequency on its face, and runtime has no range of its own.
+    """
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is True
+    assert sensor.value is None
+
+
+def test_converted_readings_are_left_to_the_range_check() -> None:
+    """A `user_func` reading cannot be traced back to what the device sent.
+
+    LibreNMS applies the conversion after the divisor and multiplier, so
+    undoing those two says nothing about the device's value. Only the class
+    range judges such a reading.
+    """
+    sensor = LibreNMSSensor.from_api(
+        {
+            **PI_ARM_CLOCK,
+            "sensor_class": "runtime",
+            "sensor_current": 4294967295,
+            "user_func": "sec_to_min",
+        }
+    )
+    assert sensor is not None
+    assert sensor.implausible is False
+    assert sensor.value == 4294967295
+
+
+async def test_raspberry_pi_clocks_log_no_warning(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Pi's CPU clocks load as readings, without the implausible warning."""
+    mock_librenms.set_sensors([PI_ARM_CLOCK, PI_CORE_CLOCK])
+    await setup_integration(hass, mock_config_entry)
+
+    sensors = mock_config_entry.runtime_data.data.sensors_by_device[1]
+    assert [(s.value, s.implausible) for s in sensors] == [
+        (1500345728, False),
+        (500000992, False),
+    ]
+    assert "plausible range" not in caplog.text
 
 
 def test_deleted_and_enum_sensors_are_skipped() -> None:

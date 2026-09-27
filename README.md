@@ -370,9 +370,13 @@ Two things are handled that the raw API does not make obvious:
 - **Impossible readings are reported as unavailable.** Hardware that
   cannot read a sensor tends to return a 32-bit sentinel instead of nothing:
   real instances report temperatures of 4294704 °C while the sensor's own
-  limits stay perfectly sane. Those entities go unavailable and recover on
-  their own if the reading comes back, and the integration logs a one-time
-  warning saying how many were affected.
+  limits stay perfectly sane. A reading counts as impossible when it is
+  outside what its kind of sensor can report, or when the value the device
+  sent, before LibreNMS scaled it, is at the very top of the 32-bit range.
+  Frequencies are in Hz and have no fixed limit, because CPU clocks and
+  radio links run into the gigahertz. Those entities go unavailable and
+  recover on their own if the reading comes back, and the integration logs a
+  one-time warning saying how many were affected.
 
 If the sensors request fails (a timeout, an error from LibreNMS, a role that
 cannot read sensors), only the health sensors go unavailable. Device status,

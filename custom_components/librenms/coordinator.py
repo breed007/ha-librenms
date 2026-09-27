@@ -45,6 +45,7 @@ from .const import (
     POLLER_STALE_AFTER,
     SENSOR_ABSURD_MAGNITUDE,
     SENSOR_PLAUSIBLE_RANGE,
+    SENSOR_WRAP_WINDOW,
     SEVERITY_CRITICAL,
     SEVERITY_OK,
     SEVERITY_WARNING,
@@ -294,9 +295,13 @@ class LibreNMSSensor:
 
         # `sensor_current` is already scaled. The divisor and multiplier
         # alongside it describe how the poller derived it and must not be
-        # applied again -- doing so puts every voltage out by 1000x.
-        raw = _as_float(payload.get("sensor_current"))
-        value, implausible = cls._sanity_check(sensor_class, raw)
+        # applied again -- doing so puts every voltage out by 1000x. They
+        # are used only to recover the value the device sent, to spot a
+        # 32-bit sentinel; see _is_wrapped.
+        reading = _as_float(payload.get("sensor_current"))
+        value, implausible = cls._sanity_check(sensor_class, reading)
+        if value is not None and cls._is_wrapped(payload, value):
+            value, implausible = None, True
 
         return cls(
             sensor_id=sensor_id,
@@ -311,17 +316,34 @@ class LibreNMSSensor:
 
     @staticmethod
     def _sanity_check(
-        sensor_class: str, raw: float | None
+        sensor_class: str, reading: float | None
     ) -> tuple[float | None, bool]:
         """Return the reading, or None when it is obviously not a reading."""
-        if raw is None:
+        if reading is None:
             return None, False
         low, high = SENSOR_PLAUSIBLE_RANGE.get(
             sensor_class, (-SENSOR_ABSURD_MAGNITUDE, SENSOR_ABSURD_MAGNITUDE)
         )
-        if not low <= raw <= high:
+        if not low <= reading <= high:
             return None, True
-        return raw, False
+        return reading, False
+
+    @staticmethod
+    def _is_wrapped(payload: dict[str, Any], reading: float) -> bool:
+        """Return True if the device sent a 32-bit sentinel for this reading.
+
+        LibreNMS's poller divides the device's value by `sensor_divisor`,
+        multiplies by `sensor_multiplier`, then applies `user_func` if set.
+        Undoing the first two recovers what the device sent. A `user_func`
+        (a unit conversion) cannot be undone this way, so those are left to
+        the range check.
+        """
+        if _as_str(payload.get("user_func")):
+            return False
+        divisor = _as_float(payload.get("sensor_divisor")) or 1.0
+        multiplier = _as_float(payload.get("sensor_multiplier")) or 1.0
+        sent = abs(reading * divisor / multiplier)
+        return 2**32 - SENSOR_WRAP_WINDOW <= sent <= 2**32
 
 
 @dataclass(slots=True)

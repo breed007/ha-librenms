@@ -145,8 +145,13 @@ same filtering LibreNMS does.**
 - **`last_polled`** is a naive local-time string with no zone. The stale-poller
   check compares it with the previous poll's value instead of the clock.
 - **`sensor_current` is already scaled.** Do not apply `sensor_divisor` or
-  `sensor_multiplier` again. Unreadable sensors report a ~2^32 sentinel, caught
-  by `SENSOR_PLAUSIBLE_RANGE`.
+  `sensor_multiplier` again. Unreadable sensors report a ~2^32 sentinel. Two
+  checks catch it: `SENSOR_PLAUSIBLE_RANGE` per class (units from LibreNMS
+  `lang/en/sensors.php`), and `SENSOR_WRAP_WINDOW`, which undoes divisor and
+  multiplier (never user_func) only to test whether the device sent a value
+  near 2^32. Frequency is Hz and has no class range: CPU clocks are ~1.5e9,
+  60 GHz radios ~6.7e10, and offsets go negative. Check any new bound
+  against LibreNMS `tests/data/*.json`, which records every sensor value.
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.
 - **The vendor** comes from the `icon` filename, not `os`.

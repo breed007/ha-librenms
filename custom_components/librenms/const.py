@@ -95,12 +95,18 @@ IGNORED_SENSOR_CLASSES: Final = frozenset({"state"})
 # than nothing at all -- real instances return temperatures of 4294704.096 C
 # while the sensor's own limits stay perfectly sane. Readings outside these
 # bounds are treated as "no reading" instead of being published as fact.
+#
+# Units are LibreNMS's (lang/en/sensors.php). The bounds were checked
+# against every sensor in LibreNMS's recorded test data at 26.9.1.1: what
+# they reject there is a sentinel or a vendor definition that skips its own
+# scaling, never a real reading. Frequency has no bound of its own: it is in
+# Hz, 60 GHz radios report about 6.7e10, CPU clocks about 1.5e9, and carrier
+# offsets go negative. Its sentinels are caught by SENSOR_WRAP_WINDOW.
 SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "charge": (0.0, 100.0),
     "current": (-10_000.0, 10_000.0),
     "dbm": (-200.0, 50.0),
     "fanspeed": (0.0, 100_000.0),
-    "frequency": (0.0, 1_000_000.0),
     "humidity": (0.0, 100.0),
     "load": (0.0, 100.0),
     "power": (-1_000_000.0, 1_000_000.0),
@@ -112,3 +118,10 @@ SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
 # Fallback bound for classes with no specific range, to catch the same
 # sentinel values without guessing at real-world limits.
 SENSOR_ABSURD_MAGNITUDE: Final = 1e12
+
+# A sensor whose raw SNMP value, before LibreNMS applied its divisor and
+# multiplier, lies within this distance of 2^32 is a small negative number
+# read as unsigned, or all ones: a sentinel in any class and at any scale.
+# A range cannot catch these everywhere (2^32 - 2145 Hz is a believable
+# radio frequency), but no real reading in LibreNMS's test data comes near.
+SENSOR_WRAP_WINDOW: Final = 2**20
