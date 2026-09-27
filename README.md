@@ -146,11 +146,27 @@ docker compose exec librenms lnms user:add --role=global-read homeassistant
 
 Here `librenms` is the name of the LibreNMS service in your compose file.
 
-The command asks for a password. Give the account a long random password,
-because it can see every device. It creates a local LibreNMS account, which
-can only sign in to the web interface if LibreNMS uses its own user
-database. If you create the token on the server in step 2, nobody ever
-needs to sign in as this account, so you do not need to keep the password.
+The command then opens a short form. The username and the `global-read`
+role are already filled in, so press Enter to accept them. Type a long random
+password, because the account can see every device, then press Enter through
+the email, full name and description, which can stay empty. LibreNMS rejects
+passwords shorter than 8 characters and, by default, passwords that appear in
+known data breaches. The form needs a terminal, so it fails if you pipe input
+into the command.
+
+The command creates a local LibreNMS account, which can only sign in to the
+web interface if LibreNMS uses its own user database. If you create the
+token on the server in step 2, nobody ever needs to sign in as this account,
+so you do not need to keep the password. In that case you can skip the form
+and let the command set a random password that is never shown:
+
+```bash
+lnms user:add --role=global-read --password="$(openssl rand -base64 24)" homeassistant
+```
+
+With the Docker image, put `docker compose exec librenms` in front as
+before. The `$(openssl ...)` part runs on the machine where you type the
+command, so `openssl` has to be installed there.
 
 ### Step 2: create the token
 
