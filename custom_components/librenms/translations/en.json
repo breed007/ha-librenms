@@ -28,6 +28,7 @@
       "insufficient_permissions": "LibreNMS accepted the API token, but its user is not allowed to list devices. Give that user the Global Read role.",
       "invalid_auth": "LibreNMS rejected the API token. Check that it still exists under Settings → API → API Access.",
       "invalid_url": "That does not look like a valid URL.",
+      "redirected": "LibreNMS answered with a redirect to {redirect_url} instead of the API. If that is the address of your LibreNMS instance, enter it as the URL. The API token is never sent to a redirected address.",
       "unknown": "Unexpected error. Check the Home Assistant log for details."
     },
     "abort": {

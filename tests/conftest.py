@@ -93,14 +93,15 @@ class MockLibreNMS:
         message: str = "error",
         text: str | None = None,
         exc: Exception | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Make one endpoint fail the way LibreNMS or a proxy would.
 
         An error status gets LibreNMS's own api_error() body; `text` replaces
         the body outright (an HTML error page, say) and `exc` raises instead
-        of answering.
+        of answering. `headers` adds response headers, such as a Location.
         """
-        failure: dict[str, Any] = {"status": status, "exc": exc}
+        failure: dict[str, Any] = {"status": status, "exc": exc, "headers": headers}
         if text is not None:
             failure["text"] = text
         else:

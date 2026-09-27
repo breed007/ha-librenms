@@ -405,6 +405,12 @@ the token's user has a role that cannot read them. Give that user the
 case, because the token is fine; it recovers by itself on the next update
 once the role is fixed.
 
+**"LibreNMS answered with a redirect"**: the URL you entered redirects
+somewhere else, most often from http to https or to a login page. The
+integration never follows redirects, because the API token would go along to
+whatever address the redirect names. If the address shown is your LibreNMS
+instance, enter that as the URL (or use **Reconfigure** on an existing entry).
+
 **Entities go unavailable during a LibreNMS restart** — expected. The
 coordinator retries with backoff and entities come back on the next successful
 poll, with no user action needed.

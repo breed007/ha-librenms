@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 import logging
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from aiohttp import ClientError, ClientResponseError, ClientSession, ClientTimeout
+from aiohttp import (
+    ClientError,
+    ClientResponseError,
+    ClientSession,
+    ClientTimeout,
+    hdrs,
+)
+from yarl import URL
 
 from .const import API_PATH, OPEN_ALERT_STATES, REQUEST_TIMEOUT
 
@@ -36,6 +44,24 @@ class LibreNMSPermissionError(LibreNMSError):
 
 class LibreNMSNotFoundError(LibreNMSConnectionError):
     """Raised on HTTP 404: the URL does not lead to this API endpoint."""
+
+
+class LibreNMSRedirectError(LibreNMSConnectionError):
+    """Raised when the instance answers with a redirect instead of the API.
+
+    Redirects are never followed. aiohttp drops Authorization and cookies on
+    a cross-origin redirect but not a custom header like X-Auth-Token, so
+    following one would hand the token, and with it every SNMP credential
+    LibreNMS holds, to whatever host the redirect names.
+    """
+
+    def __init__(self, location: str) -> None:
+        """Record where the instance tried to send the request."""
+        super().__init__(
+            f"LibreNMS redirected to {location} instead of answering. If that is "
+            "the right address, reconfigure the integration to use it"
+        )
+        self.location = location
 
 
 def normalize_url(url: str) -> str:
@@ -96,6 +122,7 @@ class LibreNMSClient:
                 headers={"X-Auth-Token": self._token},
                 params=params,
                 timeout=ClientTimeout(total=REQUEST_TIMEOUT),
+                allow_redirects=False,
             ) as response:
                 if response.status == 401:
                     raise LibreNMSAuthError(
@@ -109,6 +136,12 @@ class LibreNMSClient:
                 if response.status == 404:
                     raise LibreNMSNotFoundError(
                         f"LibreNMS returned HTTP 404 for {endpoint}"
+                    )
+                if 300 <= response.status < 400:
+                    raise LibreNMSRedirectError(
+                        _redirect_target(
+                            url, response.headers.get(hdrs.LOCATION), endpoint
+                        )
                     )
                 response.raise_for_status()
                 # Reverse proxies and error pages routinely return the wrong
@@ -180,6 +213,26 @@ class LibreNMSClient:
         except LibreNMSNotFoundError:
             return []
         return _as_list(payload, "sensors")
+
+
+def _redirect_target(request_url: str, location: str | None, endpoint: str) -> str:
+    """Return the address a redirect points at, as a URL to configure.
+
+    A redirect for `/api/v0/system` to `https://host/api/v0/system` is the
+    instance moving (http to https, a new name); report the base URL the
+    user should enter. Anything else, such as a login portal, is reported
+    as is.
+    """
+    if not location:
+        return "an unnamed location"
+    target = URL(request_url).join(URL(location))
+    suffix = f"{API_PATH}/{endpoint.lstrip('/')}"
+    path = target.path.rstrip("/")
+    if target.scheme in ("http", "https") and path.endswith(suffix):
+        base = target.with_path(path[: -len(suffix)] or "/").with_query(None)
+        with suppress(ValueError):
+            return normalize_url(str(base))
+    return str(target)
 
 
 def _as_list(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:

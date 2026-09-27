@@ -30,6 +30,7 @@ from .api import (
     LibreNMSConnectionError,
     LibreNMSError,
     LibreNMSPermissionError,
+    LibreNMSRedirectError,
     normalize_url,
 )
 from .const import (
@@ -120,6 +121,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Collect the instance URL and API token."""
         errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {}
 
         if user_input is not None:
             try:
@@ -141,6 +143,9 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_auth"
                 except LibreNMSPermissionError:
                     errors["base"] = "insufficient_permissions"
+                except LibreNMSRedirectError as err:
+                    errors["base"] = "redirected"
+                    placeholders["redirect_url"] = err.location
                 except LibreNMSConnectionError:
                     errors["base"] = "cannot_connect"
                 except LibreNMSError:
@@ -160,6 +165,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 STEP_USER_SCHEMA, user_input
             ),
             errors=errors,
+            description_placeholders=placeholders,
         )
 
     async def async_step_reauth(
@@ -174,6 +180,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
         """Collect a replacement API token."""
         errors: dict[str, str] = {}
         entry = self._get_reauth_entry()
+        placeholders = {"url": entry.data[CONF_URL]}
 
         if user_input is not None:
             try:
@@ -187,6 +194,9 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except LibreNMSPermissionError:
                 errors["base"] = "insufficient_permissions"
+            except LibreNMSRedirectError as err:
+                errors["base"] = "redirected"
+                placeholders["redirect_url"] = err.location
             except LibreNMSConnectionError:
                 errors["base"] = "cannot_connect"
             except LibreNMSError:
@@ -202,7 +212,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=STEP_REAUTH_SCHEMA,
-            description_placeholders={"url": entry.data[CONF_URL]},
+            description_placeholders=placeholders,
             errors=errors,
         )
 
