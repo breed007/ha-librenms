@@ -75,13 +75,24 @@ async def async_remove_config_entry_device(
     device_entry: dr.DeviceEntry,
 ) -> bool:
     """Allow removing a device that LibreNMS no longer monitors."""
-    coordinator = entry.runtime_data
+    # The hub itself must stay for as long as the entry exists.
+    if (DOMAIN, entry.entry_id) in device_entry.identifiers:
+        return False
+
+    # While setup is retrying there is no coordinator and no device list to
+    # check against. Deleting a stale device is the way out of a long
+    # empty-list blip, so allow it; the next setup that succeeds recreates
+    # any device LibreNMS still lists.
+    coordinator: LibreNMSDataUpdateCoordinator | None = getattr(
+        entry, "runtime_data", None
+    )
+    if coordinator is None:
+        return True
+
     current_ids = {
         (DOMAIN, f"{entry.entry_id}_{device_id}")
         for device_id in coordinator.data.devices
     }
-    # The hub itself must stay for as long as the entry exists.
-    current_ids.add((DOMAIN, entry.entry_id))
     if device_entry.identifiers & current_ids:
         return False
 

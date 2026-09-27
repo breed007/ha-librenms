@@ -15,6 +15,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
 )
+from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.librenms import async_remove_config_entry_device
 from custom_components.librenms.const import (
@@ -23,9 +24,16 @@ from custom_components.librenms.const import (
     CONF_URL,
     CONF_VERIFY_SSL,
     DOMAIN,
+    EMPTY_DEVICE_POLLS,
 )
 
-from .conftest import MockLibreNMS, async_poll, get_device, setup_integration
+from .conftest import (
+    MockLibreNMS,
+    async_poll,
+    get_device,
+    remove_device,
+    setup_integration,
+)
 from .const import BASE_URL, ENTRY_DATA
 
 
@@ -395,6 +403,39 @@ async def test_stale_device_can_be_removed(
     )
     # The hub must survive for as long as the entry does.
     assert not await async_remove_config_entry_device(hass, mock_config_entry, hub)
+
+
+async def test_device_can_be_removed_while_setup_is_retrying(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """QA round 4, R3: deleting a device must not need a loaded entry.
+
+    A restart during an empty-list blip leaves the entry retrying setup,
+    and deleting the stale device is the documented way out, so it has to
+    work then. There is no device list to check it against, so any device
+    but the hub may go; the next setup simply does not see it again.
+    """
+    await setup_integration(hass, mock_config_entry)
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hass.data.get(DOMAIN, {}).pop(EMPTY_DEVICE_POLLS, None)
+    mock_librenms.set_devices([])
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+    hub = get_device(hass, mock_config_entry)
+    assert not await async_remove_config_entry_device(hass, mock_config_entry, hub)
+
+    response = await remove_device(
+        hass, hass_ws_client, mock_config_entry, get_device(hass, mock_config_entry, 2)
+    )
+    assert response["success"], response
+    assert get_device(hass, mock_config_entry, 2) is None
+    assert get_device(hass, mock_config_entry) is not None
 
 
 async def test_reconfigure_keeps_entities_and_moves_the_hub_link(
