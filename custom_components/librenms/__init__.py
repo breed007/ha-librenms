@@ -21,6 +21,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> 
     coordinator = LibreNMSDataUpdateCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
+    # Register the hub up front so monitored devices can point at it by its
+    # registry id. Linking through `via_device=(DOMAIN, entry_id)` is
+    # deprecated from Home Assistant 2026.9 and stops working in 2027.8.
+    hub = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        entry_type=dr.DeviceEntryType.SERVICE,
+        name="LibreNMS",
+        manufacturer="LibreNMS",
+        model="Network monitoring",
+        sw_version=coordinator.system.get("local_ver"),
+        configuration_url=coordinator.client.base_url,
+    )
+    coordinator.hub_device_id = hub.id
+
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

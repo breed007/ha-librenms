@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -70,6 +72,46 @@ async def test_hub_and_devices_registered(
     garage = get_device(hass, mock_config_entry, 2)
     assert garage is not None
     assert garage.name == "Garage AP"
+
+
+async def test_devices_link_to_the_hub_by_registry_id(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Children use `via_device_id`; the deprecated `via_device` is never sent.
+
+    Home Assistant 2026.9 deprecates `via_device` and 2027.8 drops it. Spying
+    on the registry call proves the old keyword is gone on every supported
+    version, not only on the ones that happen to log a warning about it.
+    """
+    registry = dr.async_get(hass)
+    original = dr.DeviceRegistry.async_get_or_create
+    with patch.object(
+        dr.DeviceRegistry,
+        "async_get_or_create",
+        autospec=True,
+        side_effect=original,
+    ) as spy:
+        await setup_integration(hass, mock_config_entry)
+
+    assert spy.call_count > 0
+    assert not [call for call in spy.call_args_list if "via_device" in call.kwargs]
+
+    hub = get_device(hass, mock_config_entry)
+    assert hub is not None
+    assert hub.entry_type is dr.DeviceEntryType.SERVICE
+    assert mock_config_entry.runtime_data.hub_device_id == hub.id
+
+    children = [
+        device
+        for device in dr.async_entries_for_config_entry(
+            registry, mock_config_entry.entry_id
+        )
+        if device.id != hub.id
+    ]
+    assert len(children) == 4
+    assert all(device.via_device_id == hub.id for device in children)
 
 
 async def test_device_without_hardware_still_has_a_manufacturer(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -22,15 +22,9 @@ class LibreNMSEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
         super().__init__(coordinator)
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{entry_id}_{key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            entry_type=DeviceEntryType.SERVICE,
-            name="LibreNMS",
-            manufacturer="LibreNMS",
-            model="Network monitoring",
-            sw_version=coordinator.system.get("local_ver"),
-            configuration_url=coordinator.client.base_url,
-        )
+        # The hub itself is registered in async_setup_entry; this only links
+        # the entity to it.
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry_id)})
 
 
 class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
@@ -53,7 +47,7 @@ class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
         device = coordinator.data.devices[device_id]
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry_id}_{device_id}")},
-            via_device=(DOMAIN, entry_id),
+            via_device_id=coordinator.hub_device_id,
             name=device.name,
             # `hardware` is the model ("U7-Pro-XG", "DS923+") -- LibreNMS
             # calls it Platform. The vendor comes from the device icon, which

@@ -323,6 +323,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             entry.data[CONF_API_TOKEN],
         )
         self.system: dict[str, Any] = {}
+        # Device registry id of the hub, set once async_setup_entry has
+        # registered it. Monitored devices link to the hub through it.
+        self.hub_device_id: str | None = None
 
         # Alert id -> severity at the time we last saw it. Severity is part of
         # the key so an escalation (warning -> critical) re-fires, while an
