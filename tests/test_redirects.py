@@ -238,7 +238,9 @@ async def test_reauth_flow_explains_a_redirect(
         result["flow_id"], {CONF_API_TOKEN: "another-token"}
     )
 
-    assert result["errors"] == {"base": "redirected"}
+    # The reauth form has no URL field, so it points to Reconfigure instead
+    # of telling the user to enter a URL.
+    assert result["errors"] == {"base": "redirected_reauth"}
     placeholders = result["description_placeholders"]
     assert placeholders["url"] == BASE_URL
     assert placeholders["redirect_url"] == "https://sso.example.com/login"

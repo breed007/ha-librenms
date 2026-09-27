@@ -228,6 +228,9 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
             )
             placeholders.update(extra)
+            if errors.get("base") == "redirected":
+                # This form has no URL field; the fix is Reconfigure.
+                errors["base"] = "redirected_reauth"
             if not errors:
                 return self.async_update_reload_and_abort(
                     entry, data_updates={CONF_API_TOKEN: user_input[CONF_API_TOKEN]}
