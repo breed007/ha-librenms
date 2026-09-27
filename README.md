@@ -431,6 +431,15 @@ integration never follows redirects, because the API token would go along to
 whatever address the redirect names. If the address shown is your LibreNMS
 instance, enter that as the URL (or use **Reconfigure** on an existing entry).
 
+**A health sensor appears twice, once unavailable, with the new one ending in
+`_2`**: LibreNMS rediscovered the sensor under a new id, so Home Assistant sees
+a new sensor. The old entity is kept rather than deleted automatically,
+because a sensor missing from one update looks exactly like a retired one,
+and deleting it would throw away any renaming or settings you gave it. To
+tidy up, reload the integration (or restart Home Assistant), delete the old
+entity from its settings, then rename the new entity to the old entity id so
+automations and dashboards keep working.
+
 **Entities go unavailable during a LibreNMS restart**: expected. The
 coordinator retries with backoff and entities come back on the next successful
 poll, with no user action needed.

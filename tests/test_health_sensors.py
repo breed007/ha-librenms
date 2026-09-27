@@ -254,3 +254,35 @@ async def test_sensors_missing_at_startup_are_created_when_they_arrive(
     await async_poll(hass, freezer)
 
     assert hass.states.get("sensor.core_sw01_system").state == "45.0"
+
+
+async def test_retired_sensor_can_be_deleted_after_a_reload(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The documented way to clean up after rediscovery actually works.
+
+    Registry entries are never removed automatically, because a sensor
+    missing from one response looks exactly like a retired one and removal
+    would throw away the user's customizations. After a reload the old
+    entity is no longer provided, which is what lets Home Assistant offer to
+    delete it, and its entry is still intact until the user does.
+    """
+    await setup_integration(hass, mock_config_entry)
+    sensors = [
+        _sensor_row(111, 1, "System", 46) if s["sensor_id"] == 11 else dict(s)
+        for s in mock_librenms.sensors["sensors"]
+    ]
+    mock_librenms.set_sensors(sensors)
+    await async_poll(hass, freezer)
+    assert "restored" not in hass.states.get("sensor.core_sw01_system").attributes
+
+    assert await hass.config_entries.async_reload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    old = hass.states.get("sensor.core_sw01_system")
+    assert old.state == STATE_UNAVAILABLE
+    assert old.attributes["restored"] is True
+    assert er.async_get(hass).async_get("sensor.core_sw01_system") is not None
