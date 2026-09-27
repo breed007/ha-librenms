@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
@@ -80,4 +82,15 @@ async def async_remove_config_entry_device(
     }
     # The hub itself must stay for as long as the entry exists.
     current_ids.add((DOMAIN, entry.entry_id))
-    return not device_entry.identifiers & current_ids
+    if device_entry.identifiers & current_ids:
+        return False
+
+    # The user is deleting a device LibreNMS no longer shows this token.
+    # Its open alerts stop counting as seen, so they no longer hold the
+    # problem sensor on.
+    prefix = f"{entry.entry_id}_"
+    for domain, identifier in device_entry.identifiers:
+        if domain == DOMAIN and identifier.startswith(prefix):
+            with suppress(ValueError):
+                coordinator.async_forget_device(int(identifier.removeprefix(prefix)))
+    return True

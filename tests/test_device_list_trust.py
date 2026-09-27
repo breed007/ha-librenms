@@ -21,15 +21,23 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
 )
 
-from custom_components.librenms.const import EVENT_ALERT
+from custom_components.librenms import async_remove_config_entry_device
+from custom_components.librenms.const import (
+    CONF_INCLUDE_DISABLED,
+    CONF_SCAN_INTERVAL,
+    DOMAIN,
+    EMPTY_DEVICE_POLLS,
+    EVENT_ALERT,
+)
 
-from .conftest import MockLibreNMS, async_poll, setup_integration
+from .conftest import MockLibreNMS, async_poll, get_device, setup_integration
 
 PROBLEM = "binary_sensor.librenms_problem"
 DEVICES = "sensor.librenms_devices"
@@ -282,3 +290,156 @@ async def test_blip_during_retry_count_is_not_carried_into_a_new_run(
 
     assert "0" not in devices
     assert hass.states.get(DEVICES).state == STATE_UNAVAILABLE
+
+
+# Rule 2 has to hold across a reload or restart, not just within one run of
+# the coordinator. The device registry is the integration's lasting record of
+# which devices the user has seen, so at startup an open alert on a device
+# already in the registry counts as seen (QA round 3, F1).
+
+
+async def test_seen_alert_survives_a_reload_after_empty_lists(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA's repro A: two empty lists, then the user clicks Reload.
+
+    The reload's first update is the third empty list in a row, so it is
+    accepted at startup. Critical alert 101 is still open in LibreNMS, so
+    the problem sensor must stay on, and must not turn off then on again
+    when the devices come back.
+    """
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    good = mock_librenms.devices
+    mock_librenms.set_devices([])
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+    problem = _record(hass, PROBLEM)
+
+    await hass.config_entries.async_reload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get(DEVICES).state == "0"
+    state = hass.states.get(PROBLEM)
+    assert state.state == "on"
+    assert state.attributes["alerts_critical_hidden"] == 1
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    assert "off" not in problem
+    assert hass.states.get(PROBLEM).state == "on"
+    assert _fired(events) == []
+
+
+async def test_seen_alert_survives_a_restart_during_a_long_blip(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA's repro B: Home Assistant restarts while the list stays empty.
+
+    A restart loses everything in memory, including the empty-list count;
+    the entry retries setup until the third empty list is accepted.
+    """
+    await setup_integration(hass, mock_config_entry)
+    good = mock_librenms.devices
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hass.data.get(DOMAIN, {}).pop(EMPTY_DEVICE_POLLS, None)
+    mock_librenms.set_devices([])
+    problem = _record(hass, PROBLEM)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    for _ in range(4):
+        await async_poll(hass, freezer, seconds=300)
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    state = hass.states.get(PROBLEM)
+    assert state.state == "on"
+    assert state.attributes["alerts_critical_hidden"] == 1
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    assert "off" not in problem
+    assert _fired(events) == []
+
+
+async def test_seen_alert_survives_an_options_save_while_hidden(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA's repro C: the device leaves the token's view for good.
+
+    Saving options reloads the entry. The alert is still open, so the
+    problem sensor keeps saying so.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+    assert hass.states.get(PROBLEM).state == "on"
+    problem = _record(hass, PROBLEM)
+
+    coordinator = mock_config_entry.runtime_data
+    # Options only reload the entry when they change.
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_SCAN_INTERVAL: 120, CONF_INCLUDE_DISABLED: False},
+    )
+    await hass.async_block_till_done()
+    assert mock_config_entry.runtime_data is not coordinator
+    await async_poll(hass, freezer, seconds=121)
+
+    assert "off" not in problem
+    state = hass.states.get(PROBLEM)
+    assert state.state == "on"
+    assert state.attributes["alerts_critical_hidden"] == 1
+
+
+async def test_deleting_the_stale_device_releases_its_alert(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The way out when a device is gone from the token's view for good.
+
+    Deleting the device in Home Assistant says the user no longer wants to
+    hear about it. The problem sensor lets go of its alert straight away,
+    and it stays released after a reload.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+    assert hass.states.get(PROBLEM).attributes["alerts_critical_hidden"] == 1
+
+    # What Home Assistant does when the user deletes the device.
+    device = get_device(hass, mock_config_entry, 2)
+    assert await async_remove_config_entry_device(hass, mock_config_entry, device)
+    dr.async_get(hass).async_update_device(
+        device.id, remove_config_entry_id=mock_config_entry.entry_id
+    )
+    await async_poll(hass, freezer)
+
+    state = hass.states.get(PROBLEM)
+    assert state.state == "off"
+    assert state.attributes["alerts_critical_hidden"] == 0
+
+    await hass.config_entries.async_reload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(PROBLEM).state == "off"

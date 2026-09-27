@@ -392,8 +392,11 @@ De-duplication rules:
   between, are accepted as real.
 - A critical alert you have already been shown keeps
   `binary_sensor.librenms_problem` on until LibreNMS clears it, even if its
-  device drops out of the device list. The problem sensor's
-  `alerts_critical_hidden` attribute counts these alerts.
+  device drops out of the device list, and that holds across a reload or a
+  Home Assistant restart. The problem sensor's `alerts_critical_hidden`
+  attribute counts these alerts. If a device has left the token's view for
+  good, delete it from its device page in Home Assistant; its alerts then
+  stop holding the problem sensor on.
 
 ### Acknowledged alerts
 

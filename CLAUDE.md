@@ -63,7 +63,12 @@ all-clear, and they are deliberately independent of each other:
    critical alert that is still open keeps `has_problem` true even when its
    device is missing from the list (`alerts_critical_hidden`). Counts still
    follow the visible devices, as the round-1 Global Read fix intended.
-   Alerts on devices the token never saw count for nothing.
+   Alerts on devices the token never saw count for nothing. "Seen" must
+   survive a reload or restart, so at startup an open alert whose device is
+   already in the device registry for this entry counts as seen. Deleting
+   that device in Home Assistant (`async_remove_config_entry_device`) is the
+   user's way out: its alerts stop counting as seen immediately, and after a
+   reload the registry no longer lists it.
 3. **An unexpected empty list fails the update.** Devices are expected when
    the last published update had some, or, before the first success, when
    the device registry holds devices for the entry (so a reload or restart
