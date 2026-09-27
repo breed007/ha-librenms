@@ -161,6 +161,109 @@ def test_wrapped_32_bit_readings_are_rejected(row: dict[str, Any]) -> None:
     assert sensor.value is None
 
 
+# Power factor and load rows as they appear in LibreNMS's recorded test data
+# at 26.9.1.1 (raritan-pdu_px3, sentry3_3phase, apc_smx750, vertiv-dcs).
+RARITAN_OUTLET_PF = {
+    **PI_ARM_CLOCK,
+    "sensor_class": "power_factor",
+    "sensor_type": "raritan-pdu",
+    "sensor_descr": "22 DEVICE 2:Ps1:Installed",
+    "sensor_index": "measurementsOutletSensorValue.1.22.7",
+    "sensor_current": 86,
+    "sensor_limit": 0,
+    "sensor_limit_low": 0,
+}
+SENTRY_SYSTEM_PF = {
+    **RARITAN_OUTLET_PF,
+    "sensor_type": "sentry3",
+    "sensor_descr": "System Power Factor",
+    "sensor_index": "0",
+    "sensor_current": 100,
+    "sensor_limit": 1,
+    "sensor_limit_low": -1,
+}
+APC_UPS_LOAD = {
+    **PI_ARM_CLOCK,
+    "sensor_class": "load",
+    "sensor_type": "apc",
+    "sensor_descr": "Load(VA)",
+    "sensor_index": ".1.3.6.1.4.1.318.1.1.1.4.3.3.0",
+    "sensor_current": 76.2,
+    "sensor_divisor": 10,
+    "sensor_limit": 80,
+    "sensor_limit_low": None,
+}
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        # Raritan and Sentry report power factor on a 0 to 100 scale.
+        (RARITAN_OUTLET_PF, 86),
+        (SENTRY_SYSTEM_PF, 100),
+        # Most devices use -1 to 1.
+        ({**RARITAN_OUTLET_PF, "sensor_current": 0.95}, 0.95),
+        ({**RARITAN_OUTLET_PF, "sensor_current": -0.5}, -0.5),
+    ],
+    ids=["raritan_86", "sentry_100", "fraction", "negative_fraction"],
+)
+def test_power_factor_on_either_scale_is_a_reading(
+    row: dict[str, Any], expected: float
+) -> None:
+    """Power factor is shown as LibreNMS reports it, never rescaled.
+
+    Some PDUs report 0 to 100 where most report -1 to 1. Rejecting the
+    first scale threw away real readings and logged a false warning on
+    every setup, the same shape of problem as the CPU clocks.
+    """
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is False
+    assert sensor.value == expected
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        (APC_UPS_LOAD, 76.2),
+        # A UPS in overload reports more than 100 percent, which is when
+        # the reading matters most.
+        ({**APC_UPS_LOAD, "sensor_current": 150}, 150),
+    ],
+    ids=["normal", "overload_150"],
+)
+def test_ups_overload_is_a_reading(row: dict[str, Any], expected: float) -> None:
+    """Load above 100 percent is real on a UPS in overload."""
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is False
+    assert sensor.value == expected
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        # vertiv-dcs "UPS Phase B Load": 9999 over a divisor of 10.
+        {
+            **APC_UPS_LOAD,
+            "sensor_type": "vertiv-dcs",
+            "sensor_descr": "UPS Phase B Load",
+            "sensor_current": 999.9,
+        },
+        # 16-bit all ones, and the 32-bit sentinel, as a power factor.
+        {**RARITAN_OUTLET_PF, "sensor_current": 65535},
+        {**RARITAN_OUTLET_PF, "sensor_current": 4294967295},
+    ],
+    ids=["load_999_9", "power_factor_65535", "power_factor_wrap"],
+)
+def test_load_and_power_factor_sentinels_are_rejected(row: dict[str, Any]) -> None:
+    """The wider bounds still reject the sentinels these classes produce."""
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is True
+    assert sensor.value is None
+
+
 def test_converted_readings_are_left_to_the_range_check() -> None:
     """A `user_func` reading cannot be traced back to what the device sent.
 

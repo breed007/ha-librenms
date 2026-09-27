@@ -99,18 +99,26 @@ IGNORED_SENSOR_CLASSES: Final = frozenset({"state"})
 # Units are LibreNMS's (lang/en/sensors.php). The bounds were checked
 # against every sensor in LibreNMS's recorded test data at 26.9.1.1: what
 # they reject there is a sentinel or a vendor definition that skips its own
-# scaling, never a real reading. Frequency has no bound of its own: it is in
-# Hz, 60 GHz radios report about 6.7e10, CPU clocks about 1.5e9, and carrier
-# offsets go negative. Its sentinels are caught by SENSOR_WRAP_WINDOW.
+# scaling (Delta UPS volts x 10, IOS-XE millivolts), never a real reading.
+# Values are never rescaled, so a bound has to admit every scale real
+# hardware uses:
+# - frequency has no bound of its own beyond SENSOR_ABSURD_MAGNITUDE: it is
+#   in Hz, 60 GHz radios report about 6.7e10, CPU clocks about 1.5e9, and
+#   carrier offsets go negative. Its sentinels are caught by
+#   SENSOR_WRAP_WINDOW.
+# - power_factor is -1 to 1 on most devices but 0 to 100 on Raritan and
+#   Sentry PDUs, so it allows -100 to 100.
+# - load goes above 100 percent on a UPS in overload, so it allows up to
+#   300; vertiv-dcs's 999.9 sentinel stays out.
 SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "charge": (0.0, 100.0),
     "current": (-10_000.0, 10_000.0),
     "dbm": (-200.0, 50.0),
     "fanspeed": (0.0, 100_000.0),
     "humidity": (0.0, 100.0),
-    "load": (0.0, 100.0),
+    "load": (0.0, 300.0),
     "power": (-1_000_000.0, 1_000_000.0),
-    "power_factor": (-1.0, 1.0),
+    "power_factor": (-100.0, 100.0),
     "temperature": (-100.0, 250.0),
     "voltage": (-1_000.0, 1_000.0),
 }

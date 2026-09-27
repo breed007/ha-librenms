@@ -149,9 +149,13 @@ same filtering LibreNMS does.**
   checks catch it: `SENSOR_PLAUSIBLE_RANGE` per class (units from LibreNMS
   `lang/en/sensors.php`), and `SENSOR_WRAP_WINDOW`, which undoes divisor and
   multiplier (never user_func) only to test whether the device sent a value
-  near 2^32. Frequency is Hz and has no class range: CPU clocks are ~1.5e9,
-  60 GHz radios ~6.7e10, and offsets go negative. Check any new bound
-  against LibreNMS `tests/data/*.json`, which records every sensor value.
+  near 2^32. Values are never rescaled, so each bound must admit every scale
+  real hardware uses. Frequency is Hz with only the generic 1e12 bound (CPU
+  clocks ~1.5e9, 60 GHz radios ~6.7e10, offsets negative). Power factor is
+  -100 to 100 because Raritan and Sentry PDUs report 0 to 100. Load is 0 to
+  300 because a UPS in overload reports over 100 (vertiv-dcs's 999.9
+  sentinel stays out). Check any new bound against LibreNMS
+  `tests/data/*.json`, which records every sensor value.
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.
 - **The vendor** comes from the `icon` filename, not `os`.
