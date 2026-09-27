@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
@@ -638,6 +638,12 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         if isinstance(err, LibreNMSAuthError):
             raise ConfigEntryAuthFailed(str(err)) from err
         if isinstance(err, LibreNMSPermissionError):
+            if self.config_entry.state is not ConfigEntryState.LOADED:
+                # During setup the error shows on the integration card. A
+                # repair raised now could not be cleaned up if the user then
+                # disabled the entry: Home Assistant does not unload an entry
+                # that never loaded.
+                raise UpdateFailed(str(err)) from err
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,

@@ -6,7 +6,11 @@ import logging
 from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.config_entries import SOURCE_REAUTH
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    ConfigEntryDisabler,
+    ConfigEntryState,
+)
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
@@ -323,3 +327,28 @@ async def test_other_sensor_404s_are_a_visible_failure(
     assert len(warnings) == 1
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
     assert diagnostics["sensors"]["available"] is False
+
+
+async def test_permission_error_during_setup_leaves_no_repair_behind(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """QA's N4: disabling an entry stuck retrying setup must not strand a repair.
+
+    Home Assistant does not call async_unload_entry for an entry that never
+    loaded, so a repair raised during setup could never be cleaned up. During
+    setup the message shows on the integration card instead.
+    """
+    mock_librenms.fail("devices", status=403, message="Insufficient permissions")
+    await setup_integration(hass, mock_config_entry)
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert "not allowed to read devices" in (mock_config_entry.reason or "")
+
+    await hass.config_entries.async_set_disabled_by(
+        mock_config_entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    issue_id = f"insufficient_permissions_{mock_config_entry.entry_id}"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None

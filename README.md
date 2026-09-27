@@ -428,8 +428,8 @@ token still exists under **Settings → API → API Access**, and that the user 
 belongs to is not disabled. A running integration asks for a new token when
 this happens.
 
-**"LibreNMS API token lacks permission"** (a repair, or an error during
-setup): LibreNMS accepted the token but answered 403 for devices or alerts, so
+**"LibreNMS API token lacks permission"** (a repair, or, while the
+integration is still starting, a "not allowed to read" error on its card): LibreNMS accepted the token but answered 403 for devices or alerts, so
 the token's user has a role that cannot read them. Give that user the
 **Global Read** role. The integration does not ask for a new token in this
 case, because the token is fine; it recovers by itself on the next update
