@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
@@ -91,7 +93,16 @@ async def async_remove_config_entry_device(
         (DOMAIN, f"{entry.entry_id}_{device_id}")
         for device_id in coordinator.data.devices
     }
+    if device_entry.identifiers & current_ids:
+        return False
+
     # The user is deleting a device LibreNMS no longer shows this token.
     # Once it is out of the device registry its open alerts stop counting,
-    # so they no longer hold the problem sensor on or fire events.
-    return not device_entry.identifiers & current_ids
+    # so they no longer hold the problem sensor on or fire events. If
+    # LibreNMS lists it again later, it is rebuilt like a new device.
+    prefix = f"{entry.entry_id}_"
+    for domain, identifier in device_entry.identifiers:
+        if domain == DOMAIN and identifier.startswith(prefix):
+            with suppress(ValueError):
+                coordinator.async_device_removed(int(identifier.removeprefix(prefix)))
+    return True

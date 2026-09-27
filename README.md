@@ -436,8 +436,8 @@ De-duplication rules:
   restart gives the same result. The problem sensor's
   `alerts_critical_hidden` attribute counts these alerts. If a device has
   left the token's view for good, delete it from its device page in Home
-  Assistant; its alerts then stop counting. If that device later comes back,
-  reload the integration to restore it.
+  Assistant; its alerts then stop counting. If LibreNMS lists that device
+  again later, it comes back with its entities on the next update.
 
 ### Acknowledged alerts
 

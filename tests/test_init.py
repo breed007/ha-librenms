@@ -438,6 +438,58 @@ async def test_device_can_be_removed_while_setup_is_retrying(
     assert get_device(hass, mock_config_entry) is not None
 
 
+async def test_deleted_device_comes_back_without_a_reload(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA round 4, R2: deleting a device is not a permanent ban.
+
+    The user deletes a device that left the token's view, and later it is
+    visible again (a role change reverted, a device group edited). It must
+    get its device and every entity back on the next update, under the
+    same entity ids, without a reload.
+    """
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    device = get_device(hass, mock_config_entry, 2)
+    before = sorted(
+        entry.entity_id
+        for entry in er.async_entries_for_device(
+            registry, device.id, include_disabled_entities=True
+        )
+    )
+    assert "binary_sensor.garage_ap_status" in before
+    assert len(before) == 7
+
+    good = mock_librenms.devices
+    mock_librenms.set_devices(
+        [d for d in good["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+    response = await remove_device(hass, hass_ws_client, mock_config_entry, device)
+    assert response["success"], response
+    await hass.async_block_till_done()
+    assert get_device(hass, mock_config_entry, 2) is None
+    assert hass.states.get("binary_sensor.garage_ap_status") is None
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    device = get_device(hass, mock_config_entry, 2)
+    assert device is not None
+    after = sorted(
+        entry.entity_id
+        for entry in er.async_entries_for_device(
+            registry, device.id, include_disabled_entities=True
+        )
+    )
+    assert after == before
+    assert hass.states.get("binary_sensor.garage_ap_status").state == "off"
+
+
 async def test_reconfigure_keeps_entities_and_moves_the_hub_link(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,

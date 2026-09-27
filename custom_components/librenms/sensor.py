@@ -246,6 +246,7 @@ async def async_setup_entry(
         async_add_entities,
         _health_sensor_keys,
         lambda key: [LibreNMSHealthSensor(coordinator, *key)],
+        device_of=lambda key: key[0],
     )
 
 

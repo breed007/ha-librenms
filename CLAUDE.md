@@ -26,7 +26,8 @@ custom_components/librenms/
                     forwards platforms.
   entity.py         Base entities and async_add_new_entities(), which adds
                     entities for keys (device id, (device, sensor) pair) that
-                    appear on later polls.
+                    appear on later polls, and forgets a device's keys when
+                    the user deletes it so it is rebuilt if it returns.
   binary_sensor.py  problem, poller_stale, per-device status.
   sensor.py         Instance counts, per-device sensors, last boot, health sensors.
   event.py          The alerts event entity.

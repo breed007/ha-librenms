@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -383,6 +384,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         # alert, so `recovered` can still name the rule and host.
         self._known_alerts: dict[int, str] = {}
         self._alert_records: dict[int, LibreNMSAlert] = {}
+        # Called with a LibreNMS device id when the user deletes that device
+        # in Home Assistant; see async_device_removed.
+        self._device_removed_listeners: list[Callable[[int], None]] = []
         self._primed = False
         self._warned_large_install = False
         self._warned_implausible = False
@@ -592,6 +596,30 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                     if device_id is not None:
                         ids.add(device_id)
         return ids
+
+    @callback
+    def async_add_device_removed_listener(
+        self, listener: Callable[[int], None]
+    ) -> CALLBACK_TYPE:
+        """Call `listener` with the device id whenever a device is deleted."""
+        self._device_removed_listeners.append(listener)
+
+        @callback
+        def _remove() -> None:
+            self._device_removed_listeners.remove(listener)
+
+        return _remove
+
+    @callback
+    def async_device_removed(self, device_id: int) -> None:
+        """Tell the entity trackers the user deleted this device.
+
+        Home Assistant removes its entities with it. The trackers must then
+        forget they built them, or the device would stay missing if
+        LibreNMS lists it again, until the entry was reloaded.
+        """
+        for listener in list(self._device_removed_listeners):
+            listener(device_id)
 
     def _devices_in_home_assistant(self, data: LibreNMSData) -> set[int]:
         """Return the devices whose alerts count, for this update.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterable
 
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -77,15 +78,23 @@ def async_add_new_entities[KeyT: Hashable](
     async_add_entities: AddConfigEntryEntitiesCallback,
     keys: Callable[[LibreNMSData], Iterable[KeyT]],
     build: Callable[[KeyT], Iterable[CoordinatorEntity]],
+    device_of: Callable[[KeyT], int],
 ) -> None:
     """Add entities for every key seen now, and for new keys on later polls.
 
     `keys` names what an entity is created for (a device id, a device and
-    sensor pair) and `build` creates the entities for one key. Each key is
-    built exactly once, so a key that disappears and comes back reuses its
-    existing entity instead of creating a duplicate.
+    sensor pair), `build` creates the entities for one key, and `device_of`
+    says which LibreNMS device a key belongs to. Each key is built once, so
+    a key that disappears and comes back reuses its existing entity instead
+    of creating a duplicate. The exception is a device the user deletes in
+    Home Assistant: its entities go with it, so its keys are forgotten and
+    built again if LibreNMS lists the device later.
     """
     known: set[KeyT] = set()
+
+    @callback
+    def _forget(device_id: int) -> None:
+        known.difference_update([key for key in known if device_of(key) == device_id])
 
     def _add_new() -> None:
         new_keys = set(keys(coordinator.data)) - known
@@ -100,6 +109,9 @@ def async_add_new_entities[KeyT: Hashable](
 
     _add_new()
     coordinator.config_entry.async_on_unload(coordinator.async_add_listener(_add_new))
+    coordinator.config_entry.async_on_unload(
+        coordinator.async_add_device_removed_listener(_forget)
+    )
 
 
 def async_setup_device_entities(
@@ -114,5 +126,9 @@ def async_setup_device_entities(
     reloaded.
     """
     async_add_new_entities(
-        coordinator, async_add_entities, lambda data: data.devices, build
+        coordinator,
+        async_add_entities,
+        lambda data: data.devices,
+        build,
+        device_of=lambda device_id: device_id,
     )
