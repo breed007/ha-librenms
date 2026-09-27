@@ -13,3 +13,7 @@ htmlcov/
 
 # Local editor/tooling settings
 .claude/settings.local.json
+
+# Notes kept by development agents. Local working memory, not project
+# documentation; the rest of .claude/ may hold shared project settings.
+.claude/agent-memory/
