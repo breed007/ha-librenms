@@ -41,6 +41,13 @@ ALERT_EVENT_TYPES: Final = [
     EVENT_TYPE_RECOVERED,
 ]
 
+# LibreNMS alert states (LibreNMS/Enum/AlertState.php). While a fault exists
+# its alert row moves between ACTIVE, ACKNOWLEDGED, WORSE, BETTER and CHANGED;
+# only RECOVERED (0) means it has cleared. Requesting ACTIVE alone makes an
+# acknowledged or evolving alert look like it recovered.
+ALERT_STATE_ACKNOWLEDGED: Final = 2
+OPEN_ALERT_STATES: Final = (1, 2, 3, 4, 5)
+
 SEVERITY_CRITICAL: Final = "critical"
 SEVERITY_WARNING: Final = "warning"
 SEVERITY_OK: Final = "ok"

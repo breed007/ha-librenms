@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse
 
 from aiohttp import ClientError, ClientResponseError, ClientSession, ClientTimeout
 
-from .const import API_PATH, REQUEST_TIMEOUT
+from .const import API_PATH, OPEN_ALERT_STATES, REQUEST_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -131,12 +131,19 @@ class LibreNMSClient:
         return payload.get("devices") or []
 
     async def async_get_alerts(self) -> list[dict[str, Any]]:
-        """Return currently active (state=1) alerts.
+        """Return every open alert, whatever state it has moved to.
+
+        LibreNMS defaults to ``state=1`` (active) only, which drops alerts
+        that are acknowledged or have worsened, improved or changed. The
+        endpoint accepts a comma-separated list, so ask for all open states.
 
         The API joins ``alert_rules``, so each alert already carries the rule
-        ``name`` and ``severity`` — no separate ``/rules`` lookup is needed.
+        ``name`` and ``severity``; no separate ``/rules`` lookup is needed.
         """
-        payload = await self._request("alerts", params={"state": "1"})
+        payload = await self._request(
+            "alerts",
+            params={"state": ",".join(str(state) for state in OPEN_ALERT_STATES)},
+        )
         return payload.get("alerts") or []
 
     async def async_get_sensors(self) -> list[dict[str, Any]]:

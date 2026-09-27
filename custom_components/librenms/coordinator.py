@@ -20,6 +20,7 @@ from .api import (
     LibreNMSError,
 )
 from .const import (
+    ALERT_STATE_ACKNOWLEDGED,
     CONF_API_TOKEN,
     CONF_INCLUDE_DISABLED,
     CONF_SCAN_INTERVAL,
@@ -33,6 +34,7 @@ from .const import (
     EVENT_TYPE_RECOVERED,
     IGNORED_SENSOR_CLASSES,
     LARGE_INSTALL_DEVICE_COUNT,
+    OPEN_ALERT_STATES,
     POLLER_STALE_AFTER,
     SENSOR_ABSURD_MAGNITUDE,
     SENSOR_PLAUSIBLE_RANGE,
@@ -169,7 +171,7 @@ class LibreNMSDevice:
 
 @dataclass(slots=True)
 class LibreNMSAlert:
-    """A single active alert as reported by LibreNMS."""
+    """A single open alert as reported by LibreNMS."""
 
     alert_id: int
     device_id: int | None
@@ -179,12 +181,24 @@ class LibreNMSAlert:
     severity: str
     timestamp: str | None
     note: str | None
+    state: int | None = None
+
+    @property
+    def acknowledged(self) -> bool:
+        """Return True once someone has acknowledged the alert in LibreNMS."""
+        return self.state == ALERT_STATE_ACKNOWLEDGED
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> LibreNMSAlert | None:
-        """Build an alert from an API payload, or None if it has no ID."""
+        """Build an alert, or None if it has no ID or is no longer open."""
         alert_id = _as_int(payload.get("id"))
         if alert_id is None:
+            return None
+
+        # The request already asks for open states only; this guards against
+        # an instance that ignores the filter and hands back cleared rows.
+        state = _as_int(payload.get("state"))
+        if state is not None and state not in OPEN_ALERT_STATES:
             return None
 
         severity = (_as_str(payload.get("severity")) or SEVERITY_OK).lower()
@@ -201,6 +215,7 @@ class LibreNMSAlert:
             severity=severity,
             timestamp=_as_str(payload.get("timestamp")),
             note=_as_str(payload.get("note")),
+            state=state,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -214,6 +229,7 @@ class LibreNMSAlert:
             "severity": self.severity,
             "timestamp": self.timestamp,
             "note": self.note,
+            "acknowledged": self.acknowledged,
         }
 
 
@@ -329,7 +345,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
 
         # Alert id -> severity at the time we last saw it. Severity is part of
         # the key so an escalation (warning -> critical) re-fires, while an
-        # unchanged alert stays quiet across polls.
+        # unchanged alert stays quiet across polls. The LibreNMS state is
+        # deliberately not part of it: acknowledging an alert, or it getting
+        # worse or better, is the same open fault and must not re-fire.
         self._seen_alerts: dict[int, str] = {}
         self._primed = False
         self._warned_large_install = False
@@ -437,6 +455,11 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             devices_up=devices_up,
             devices_down=len(counted) - devices_up,
             devices_excluded=len(devices) - len(counted),
+            # Acknowledged alerts still count. Acknowledging silences
+            # LibreNMS's own notifications, but the fault is still there, and
+            # a problem sensor that clears when someone clicks "ack" would
+            # report a healthy network that is not. Each alert carries an
+            # `acknowledged` flag for anyone who wants to filter them out.
             alerts_critical=sum(
                 1 for alert in alerts if alert.severity == SEVERITY_CRITICAL
             ),

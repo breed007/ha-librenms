@@ -57,7 +57,7 @@ class MockLibreNMS:
 
         mocker.get(SYSTEM_PATTERN, side_effect=self._responder("system"))
         mocker.get(DEVICES_PATTERN, side_effect=self._responder("devices"))
-        mocker.get(ALERTS_PATTERN, side_effect=self._responder("alerts"))
+        mocker.get(ALERTS_PATTERN, side_effect=self._alerts_responder)
         mocker.get(SENSORS_PATTERN, side_effect=self._responder("sensors"))
 
     def _responder(
@@ -77,6 +77,30 @@ class MockLibreNMS:
             )
 
         return _side_effect
+
+    async def _alerts_responder(
+        self, method: str, url: Any, data: Any
+    ) -> AiohttpClientMockResponse:
+        """Filter alerts by `state` exactly as LibreNMS's list_alerts does.
+
+        LibreNMS returns only state 1 unless `state` is given, and splits the
+        parameter on commas. Returning every alert regardless would let a
+        test pass against code that asks for the wrong states.
+        """
+        requested = url.query.get("state")
+        wanted = requested.split(",") if requested is not None else ["1"]
+        alerts = [
+            alert
+            for alert in self.alerts.get("alerts", [])
+            if str(alert.get("state", "1")) in wanted
+        ]
+        return AiohttpClientMockResponse(
+            method=method,
+            url=url,
+            status=self.status,
+            json={**self.alerts, "count": len(alerts), "alerts": alerts},
+            exc=self.exception,
+        )
 
     def set_alerts(self, alerts: list[dict[str, Any]]) -> None:
         """Replace the active alert list returned by the instance."""

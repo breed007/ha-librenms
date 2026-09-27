@@ -225,6 +225,7 @@ rule: High CPU
 severity: critical
 timestamp: "2025-07-28 10:00:00"
 note: null
+acknowledged: false     # true once acknowledged in LibreNMS
 ```
 
 De-duplication rules:
@@ -232,8 +233,20 @@ De-duplication rules:
 - Alerts already open when Home Assistant starts do **not** replay.
 - An alert that stays open at the same severity fires once, not once per poll.
 - An alert that escalates (warning → critical) fires again at the new severity.
+- Acknowledging an alert in LibreNMS, or LibreNMS marking it worse, better or
+  changed, does not fire anything. The alert is still open.
 - When an alert clears, a `recovered` event carries the rule and hostname from
   the last poll that saw it.
+
+### Acknowledged alerts
+
+Acknowledged alerts stay in every count: the active, critical and warning
+sensors, the per-device alert count, and `binary_sensor.librenms_problem`.
+Acknowledging an alert silences LibreNMS's own notifications, but the fault
+is still there, and a problem sensor that turned off when someone clicked
+"acknowledge" would report a healthy network that isn't. Each alert in the
+`alerts` attribute and in the bus event carries `acknowledged: true` or
+`false`, so an automation can skip acknowledged alerts if you want that.
 
 ---
 

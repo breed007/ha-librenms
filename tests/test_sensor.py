@@ -53,6 +53,7 @@ async def test_active_alerts_attributes(
         "severity": "critical",
         "timestamp": "2025-07-28 09:12:00",
         "note": None,
+        "acknowledged": False,
     }
 
 
@@ -71,6 +72,7 @@ async def test_active_alerts_attributes_are_capped(
                 "rule_id": "12",
                 "name": "Noisy rule",
                 "severity": "warning",
+                "state": "1",
                 "timestamp": "2025-07-28 09:00:00",
             }
             for index in range(75)

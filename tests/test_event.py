@@ -6,12 +6,17 @@ from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
+import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
 )
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+)
 
 from custom_components.librenms.const import EVENT_ALERT
+from custom_components.librenms.coordinator import LibreNMSAlert
 
 from .conftest import MockLibreNMS, async_poll, setup_integration
 
@@ -21,6 +26,7 @@ ALERT_101 = {
     "hostname": "ap-garage.lan.example",
     "rule_id": "7",
     "name": "Device down due to no ICMP response",
+    "state": "1",
     "severity": "critical",
     "timestamp": "2025-07-28 09:12:00",
 }
@@ -30,6 +36,7 @@ ALERT_102 = {
     "hostname": "core-sw01.lan.example",
     "rule_id": "12",
     "name": "Port utilisation over 80%",
+    "state": "1",
     "severity": "warning",
     "timestamp": "2025-07-28 08:55:00",
 }
@@ -39,6 +46,7 @@ ALERT_103 = {
     "hostname": "core-sw01.lan.example",
     "rule_id": "3",
     "name": "High CPU",
+    "state": "1",
     "severity": "critical",
     "timestamp": "2025-07-28 10:00:00",
 }
@@ -164,3 +172,133 @@ async def test_burst_of_alerts_all_fire(
         (103, "critical"),
         (101, "recovered"),
     }
+
+
+# LibreNMS/Enum/AlertState.php: every state an open alert can move through.
+ACKNOWLEDGED, WORSE, BETTER, CHANGED = "2", "3", "4", "5"
+
+
+async def test_every_open_alert_state_is_requested(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """LibreNMS returns only state 1 by default, so all open states are asked for."""
+    await setup_integration(hass, mock_config_entry)
+
+    alert_urls = [
+        call[1] for call in aioclient_mock.mock_calls if "/alerts" in str(call[1])
+    ]
+    assert alert_urls
+    for url in alert_urls:
+        assert sorted(url.query["state"].split(",")) == ["1", "2", "3", "4", "5"]
+
+
+@pytest.mark.parametrize("state", [ACKNOWLEDGED, WORSE, BETTER, CHANGED])
+async def test_state_change_is_not_a_recovery(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    state: str,
+) -> None:
+    """An alert moving between open states is the same fault, still open."""
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.set_alerts([{**ALERT_101, "state": state}, ALERT_102])
+    await async_poll(hass, freezer)
+
+    assert events == []
+    assert hass.states.get("sensor.librenms_active_alerts").state == "2"
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "1"
+    assert hass.states.get("sensor.garage_ap_active_alerts").state == "1"
+    assert hass.states.get("binary_sensor.librenms_problem").state == "on"
+
+
+async def test_alert_walking_every_open_state_recovers_only_when_it_clears(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Only leaving the open set fires `recovered`, and it fires exactly once."""
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    for state in (ACKNOWLEDGED, WORSE, BETTER, CHANGED, ACKNOWLEDGED, "1"):
+        mock_librenms.set_alerts([{**ALERT_101, "state": state}, ALERT_102])
+        await async_poll(hass, freezer)
+        assert events == [], state
+
+    # LibreNMS sets the row to RECOVERED (0) once the fault clears, which
+    # drops it out of the open states the integration asks for.
+    mock_librenms.set_alerts([{**ALERT_101, "state": "0"}, ALERT_102])
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert [(e.data["id"], e.data["event_type"]) for e in events] == [
+        (101, "recovered")
+    ]
+
+
+async def test_acknowledged_alert_is_flagged_and_still_counted(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Acknowledging silences LibreNMS, not the fault: it stays in every count."""
+    mock_librenms.set_alerts([{**ALERT_101, "state": ACKNOWLEDGED}, ALERT_102])
+    await setup_integration(hass, mock_config_entry)
+
+    alerts = hass.states.get("sensor.librenms_active_alerts").attributes["alerts"]
+    flags = {alert["id"]: alert["acknowledged"] for alert in alerts}
+    assert flags == {101: True, 102: False}
+
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "1"
+    problem = hass.states.get("binary_sensor.librenms_problem")
+    assert problem.state == "on"
+    assert problem.attributes["alerts_critical"] == 1
+
+
+async def test_acknowledging_then_escalating_still_refires(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Dedupe is on id and severity; an ack in between does not reset it."""
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.set_alerts([ALERT_101, {**ALERT_102, "state": ACKNOWLEDGED}])
+    await async_poll(hass, freezer)
+    assert events == []
+
+    escalated = {**ALERT_102, "state": WORSE, "severity": "critical"}
+    mock_librenms.set_alerts([ALERT_101, escalated])
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert [(e.data["id"], e.data["event_type"]) for e in events] == [(102, "critical")]
+    assert events[0].data["acknowledged"] is False
+
+
+@pytest.mark.parametrize(
+    ("state", "is_open", "acknowledged"),
+    [
+        ("1", True, False),
+        (2, True, True),
+        ("3", True, False),
+        ("5", True, False),
+        (None, True, False),
+        ("0", False, False),
+    ],
+)
+def test_alert_state_parsing(state: Any, is_open: bool, acknowledged: bool) -> None:
+    """A cleared row is dropped even if an instance ignores the state filter."""
+    alert = LibreNMSAlert.from_api({"id": 1, "severity": "warning", "state": state})
+    assert (alert is not None) is is_open
+    if alert is not None:
+        assert alert.acknowledged is acknowledged

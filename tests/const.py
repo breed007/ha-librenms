@@ -18,7 +18,6 @@ TOKEN = "0123456789abcdef0123456789abcdef"
 
 SYSTEM_URL = f"{API_URL}/system"
 DEVICES_URL = f"{API_URL}/devices"
-ALERTS_URL = f"{API_URL}/alerts?state=1"
 
 ENTRY_DATA: dict[str, Any] = {
     CONF_URL: BASE_URL,
