@@ -65,9 +65,10 @@ MAX_ALERT_ATTRIBUTES: Final = 50
 # devices.
 LARGE_INSTALL_DEVICE_COUNT: Final = 500
 
-# Only rewrite a device's boot-time sensor when the computed value drifts by
-# more than this many seconds. Poll jitter otherwise causes a state write on
-# every single update.
+# Only move a device's boot time earlier when a new estimate beats the
+# current one by more than this many seconds. Smaller gains are poll timing
+# noise and would otherwise each cost a recorder write. See
+# LibreNMSUptimeSensor for why estimates only ever move earlier.
 UPTIME_DRIFT_TOLERANCE: Final = 60
 
 # Report the poller as stuck once the newest `last_polled` across the whole

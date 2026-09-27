@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from itertools import pairwise
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+)
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
 )
 
 from .conftest import MockLibreNMS, async_poll, setup_integration
@@ -105,24 +110,124 @@ async def test_device_sensors(
     assert hass.states.get("sensor.garage_ap_last_boot").state == "unknown"
 
 
-async def test_boot_time_is_stable_across_polls(
+# LibreNMS polls each device every 300 s by default and writes `uptime` only
+# then (LibreNMS/Modules/Core.php); between polls the value is frozen. Home
+# Assistant polls every 60 s here, so it sees each value about five times.
+LIBRENMS_POLL_INTERVAL = 300
+HA_SCAN_INTERVAL = 60
+CORE_SW01_UPTIME = 4321000
+
+
+def _librenms_uptime(elapsed: int, phase: int, boot_age: int) -> int:
+    """Return the uptime LibreNMS reports `elapsed` seconds into a test.
+
+    LibreNMS polled the device at `phase`, `phase + 300`, ... seconds (and at
+    `phase - 300` before the test began) and reports what it measured at the
+    most recent of those. `boot_age` is the true uptime at elapsed == 0.
+    """
+    last_poll = (elapsed - phase) // LIBRENMS_POLL_INTERVAL * LIBRENMS_POLL_INTERVAL
+    return boot_age + last_poll + phase
+
+
+def _set_core_sw01_uptime(mock_librenms: MockLibreNMS, uptime: int) -> None:
+    devices = [dict(d) for d in mock_librenms.devices["devices"]]
+    devices[0]["uptime"] = uptime
+    mock_librenms.set_devices(devices)
+
+
+def _devices_polls(aioclient_mock: AiohttpClientMocker) -> int:
+    return sum(1 for call in aioclient_mock.mock_calls if "/devices" in str(call[1]))
+
+
+@pytest.mark.parametrize("phase", [0, 17, 150, 299])
+async def test_boot_time_holds_steady_under_the_real_librenms_cadence(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+    phase: int,
+) -> None:
+    """A device that never reboots keeps one boot time for hours.
+
+    Recomputing `now - uptime` on every poll produced a sawtooth here: 9 state
+    changes in 15 minutes, jumping by up to 4 minutes at a time. The first
+    reading can be up to one LibreNMS interval late, so it may be tightened
+    once, the first time LibreNMS polls after setup. After that, nothing.
+    """
+    started = dt_util.utcnow()
+    true_boot = started - timedelta(seconds=CORE_SW01_UPTIME)
+    _set_core_sw01_uptime(mock_librenms, _librenms_uptime(0, phase, CORE_SW01_UPTIME))
+    await setup_integration(hass, mock_config_entry)
+    polls_before = _devices_polls(aioclient_mock)
+    history = [hass.states.get("sensor.core_sw01_last_boot").state]
+
+    for tick in range(1, 121):  # two hours of Home Assistant polling
+        _set_core_sw01_uptime(
+            mock_librenms,
+            _librenms_uptime(tick * HA_SCAN_INTERVAL, phase, CORE_SW01_UPTIME),
+        )
+        await async_poll(hass, freezer, seconds=HA_SCAN_INTERVAL)
+        history.append(hass.states.get("sensor.core_sw01_last_boot").state)
+
+    assert _devices_polls(aioclient_mock) - polls_before == 120
+    changed_at = [
+        tick * HA_SCAN_INTERVAL
+        for tick, (before, after) in enumerate(pairwise(history), start=1)
+        if before != after
+    ]
+    assert len(changed_at) <= 1
+    assert all(when <= LIBRENMS_POLL_INTERVAL + HA_SCAN_INTERVAL for when in changed_at)
+    if phase == 0:
+        # Setup coincided with a LibreNMS poll, so there is nothing to tighten.
+        assert changed_at == []
+
+    # Everything after the first LibreNMS cycle is completely still.
+    settled = history[(LIBRENMS_POLL_INTERVAL + HA_SCAN_INTERVAL) // HA_SCAN_INTERVAL :]
+    assert len(set(settled)) == 1
+
+    # And the value it settles on is close to the real boot time: not before
+    # it (allowing a second for the clock read at setup), and no later than
+    # one Home Assistant poll after it.
+    offset = (dt_util.parse_datetime(history[-1]) - true_boot).total_seconds()
+    assert -1 <= offset <= HA_SCAN_INTERVAL + 1
+
+
+async def test_boot_time_catches_up_after_a_stalled_poller(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Poll jitter must not rewrite the boot time on every update."""
+    """A reading an hour stale at startup is corrected once LibreNMS resumes.
+
+    If Home Assistant starts while the LibreNMS poller is stuck, `uptime` is
+    an hour old and the first estimate is an hour late. Holding it until the
+    next reboot would leave it wrong for weeks.
+    """
+    true_boot = dt_util.utcnow() - timedelta(seconds=CORE_SW01_UPTIME)
+    _set_core_sw01_uptime(mock_librenms, CORE_SW01_UPTIME - 3600)
     await setup_integration(hass, mock_config_entry)
-    first = hass.states.get("sensor.core_sw01_last_boot").state
+    stale = dt_util.parse_datetime(hass.states.get("sensor.core_sw01_last_boot").state)
+    assert (stale - true_boot).total_seconds() == pytest.approx(3600, abs=2)
 
-    devices = list(mock_librenms.devices["devices"])
-    # 61s later the device reports 61s more uptime, plus a second of jitter.
-    devices[0] = {**devices[0], "uptime": 4321000 + 62}
-    mock_librenms.set_devices(devices)
+    _set_core_sw01_uptime(mock_librenms, CORE_SW01_UPTIME + HA_SCAN_INTERVAL)
+    await async_poll(hass, freezer, seconds=HA_SCAN_INTERVAL)
 
-    await async_poll(hass, freezer)
+    fixed = dt_util.parse_datetime(hass.states.get("sensor.core_sw01_last_boot").state)
+    assert abs((fixed - true_boot).total_seconds()) <= 2
 
-    assert hass.states.get("sensor.core_sw01_last_boot").state == first
+
+async def test_unknown_uptime_is_not_a_boot_time(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """LibreNMS stores 0 when it cannot read uptime; that is not "just booted"."""
+    _set_core_sw01_uptime(mock_librenms, 0)
+    await setup_integration(hass, mock_config_entry)
+
+    assert hass.states.get("sensor.core_sw01_last_boot").state == "unknown"
 
 
 async def test_boot_time_moves_after_a_reboot(
@@ -131,17 +236,29 @@ async def test_boot_time_moves_after_a_reboot(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A genuine reboot resets the reported boot time."""
+    """A smaller uptime is a reboot, and shows up on the very next poll.
+
+    This is the same rule LibreNMS uses to detect a reboot.
+    """
     await setup_integration(hass, mock_config_entry)
     first = hass.states.get("sensor.core_sw01_last_boot").state
 
-    devices = list(mock_librenms.devices["devices"])
-    devices[0] = {**devices[0], "uptime": 30}
-    mock_librenms.set_devices(devices)
-
+    _set_core_sw01_uptime(mock_librenms, 30)
     await async_poll(hass, freezer)
 
-    assert hass.states.get("sensor.core_sw01_last_boot").state != first
+    rebooted = hass.states.get("sensor.core_sw01_last_boot").state
+    assert rebooted != first
+    expected = dt_util.utcnow() - timedelta(seconds=30)
+    assert abs(dt_util.parse_datetime(rebooted) - expected) < timedelta(seconds=2)
+
+    # The new boot time then holds under the normal cadence, like any other.
+    for tick in range(1, 16):
+        _set_core_sw01_uptime(
+            mock_librenms,
+            _librenms_uptime(tick * HA_SCAN_INTERVAL, 0, 30),
+        )
+        await async_poll(hass, freezer, seconds=HA_SCAN_INTERVAL)
+        assert hass.states.get("sensor.core_sw01_last_boot").state == rebooted
 
 
 async def test_diagnostic_sensors_are_disabled_by_default(

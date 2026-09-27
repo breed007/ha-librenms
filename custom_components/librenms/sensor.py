@@ -313,7 +313,20 @@ class LibreNMSUptimeSensor(LibreNMSDeviceEntity, SensorEntity):
     """Boot time derived from the device's reported uptime.
 
     Reporting boot time rather than a running counter keeps the state stable,
-    so the recorder does not get a new row on every poll.
+    so the recorder does not get a new row on every poll. That only holds if
+    the boot time itself is stable, which takes some care:
+
+    LibreNMS writes `uptime` once per poll of the device (every 300 s by
+    default) and leaves it frozen in between, while Home Assistant usually
+    polls more often. `now - uptime` therefore creeps later by up to a whole
+    LibreNMS poll interval and then snaps back when LibreNMS polls again.
+
+    What does hold is that LibreNMS measured the uptime at or before `now`,
+    so every `now - uptime` is an upper bound on the real boot time. The
+    sensor keeps the earliest bound it has seen and only moves when a new
+    one is earlier by more than UPTIME_DRIFT_TOLERANCE. It starts over when
+    the uptime goes down, which is how LibreNMS itself detects a reboot, or
+    when the device goes down or stops reporting an uptime.
     """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -322,33 +335,49 @@ class LibreNMSUptimeSensor(LibreNMSDeviceEntity, SensorEntity):
     def __init__(
         self, coordinator: LibreNMSDataUpdateCoordinator, device_id: int
     ) -> None:
-        """Initialise the sensor."""
+        """Initialize the sensor."""
         super().__init__(coordinator, device_id, "uptime")
         self._boot_time: datetime | None = None
+        self._last_uptime: int | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Work out the boot time before the first state is written."""
+        await super().async_added_to_hass()
+        self._update_boot_time()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refine the boot time, or start over after a reboot."""
+        self._update_boot_time()
+        super()._handle_coordinator_update()
+
+    def _update_boot_time(self) -> None:
+        """Fold the latest uptime into the boot time estimate."""
+        device = self.device
+        # LibreNMS stores 0 when it could not read an uptime at all. Treating
+        # that as "booted just now" would pin a wrong value until the next
+        # reboot.
+        if device is None or not device.up or not device.uptime:
+            self._boot_time = None
+            self._last_uptime = None
+            return
+
+        uptime = device.uptime
+        candidate = dt_util.utcnow() - timedelta(seconds=uptime)
+        rebooted = self._last_uptime is not None and uptime < self._last_uptime
+        self._last_uptime = uptime
+
+        if (
+            self._boot_time is None
+            or rebooted
+            or (self._boot_time - candidate).total_seconds() > UPTIME_DRIFT_TOLERANCE
+        ):
+            self._boot_time = candidate
 
     @property
     def native_value(self) -> datetime | None:
         """Return the device's boot time."""
-        device = self.device
-        if device is None or device.uptime is None or not device.up:
-            return None
-
-        computed = dt_util.utcnow() - timedelta(seconds=device.uptime)
-        if (
-            self._boot_time is None
-            or abs((computed - self._boot_time).total_seconds())
-            > UPTIME_DRIFT_TOLERANCE
-        ):
-            self._boot_time = computed
         return self._boot_time
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Forget the cached boot time when the device reboots or drops."""
-        device = self.device
-        if device is None or not device.up:
-            self._boot_time = None
-        super()._handle_coordinator_update()
 
 
 class LibreNMSHealthSensor(LibreNMSDeviceEntity, SensorEntity):

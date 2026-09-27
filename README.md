@@ -155,7 +155,7 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 |---|---|---|
 | `binary_sensor.<device>_status` | binary_sensor (`connectivity`) | Attributes: `status_reason`, `hostname`, `location`, `disabled`, `ignored` |
 | `sensor.<device>_active_alerts` | sensor | Active alerts for this device |
-| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter so the state does not change on every poll |
+| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and it only changes when the device reboots. Accurate to about one update interval |
 | `sensor.<device>_hardware` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_operating_system` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. Raw LibreNMS string — it has no time zone, so it is not exposed as a timestamp |
