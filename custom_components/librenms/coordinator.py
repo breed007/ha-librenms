@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -126,7 +126,6 @@ class LibreNMSDevice:
     last_polled: str | None
     disabled: bool
     ignored: bool
-    raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
     @property
     def excluded(self) -> bool:
@@ -135,7 +134,13 @@ class LibreNMSDevice:
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> LibreNMSDevice | None:
-        """Build a device from an API payload, or None if it has no ID."""
+        """Build a device from an API payload, or None if it has no ID.
+
+        Only the fields below are kept. The payload itself is not: LibreNMS
+        returns every device's SNMP community and SNMPv3 passwords to any
+        token that can list devices, and there is no reason to hold them in
+        memory for the life of Home Assistant.
+        """
         device_id = _as_int(payload.get("device_id"))
         if device_id is None:
             return None
@@ -169,7 +174,6 @@ class LibreNMSDevice:
             last_polled=_as_str(payload.get("last_polled")),
             disabled=_as_bool(payload.get("disabled")),
             ignored=_as_bool(payload.get("ignore")),
-            raw=payload,
         )
 
 

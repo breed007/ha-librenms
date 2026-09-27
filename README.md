@@ -112,7 +112,28 @@ LibreNMS**, and enter:
 | **Verify SSL certificate** | Turn off only for self-signed certificates. |
 
 If the token is ever revoked or rotated, Home Assistant raises a repair prompt
-and asks for a new one — the URL does not need re-entering.
+and asks for a new one. The URL does not need re-entering.
+
+### What the token gives access to
+
+Read this before you create the token.
+
+- **The token can read every SNMP credential LibreNMS stores.** LibreNMS's
+  device API returns each device's SNMP community string and SNMPv3
+  authentication and privacy passwords, in plain text, to any token that can
+  list devices. That includes a Global Read token; there is no role that can
+  see devices without also seeing their credentials. This integration uses
+  none of those fields and does not keep them after each poll, but anyone who
+  gets hold of the token can read them all.
+- **Home Assistant backups contain the token.** It is stored with the
+  integration's configuration, so every backup includes it. Treat those
+  backups as if they held your SNMP credentials. If one is exposed, delete the
+  token in LibreNMS under **Settings → API → API Access** and create a new
+  one.
+- **Use https.** Every poll sends the token to LibreNMS, and the response
+  carries those credentials back. Over plain http, both cross your network
+  unencrypted. If your instance only serves http, putting it behind a reverse
+  proxy with TLS is worth doing before you connect Home Assistant to it.
 
 ---
 
@@ -394,8 +415,11 @@ one-time suggestion to raise the update interval. If you run an install that
 size, 300 s is a reasonable starting point.
 
 To collect diagnostics: **Settings → Devices & Services → LibreNMS → ⋮ →
-Download diagnostics**. Hostnames, locations, SNMP credentials, the instance
-URL and the API token are redacted.
+Download diagnostics**. The file is built from a fixed list of fields that are
+safe to share, such as device ids, OS, model, software versions, up/down
+state and alert severities. Hostnames, device names, IP addresses, serial
+numbers, locations, SNMP settings and credentials, alert rule names, the
+instance URL and the API token are never included.
 
 ---
 
