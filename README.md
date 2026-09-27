@@ -285,6 +285,13 @@ De-duplication rules:
   changed, does not fire anything. The alert is still open.
 - When an alert clears, a `recovered` event carries the rule and hostname from
   the last poll that saw it.
+- Events follow LibreNMS's list of open alerts, not the device list. A device
+  that drops out of one response and comes back fires nothing, because its
+  alerts never cleared. An alert on a device the token cannot see fires
+  nothing until that device becomes visible.
+- If the device list suddenly comes back empty, the update counts as failed
+  and entities go unavailable rather than reporting an all-clear. An empty
+  list that repeats for three updates in a row is accepted as real.
 
 ### Acknowledged alerts
 

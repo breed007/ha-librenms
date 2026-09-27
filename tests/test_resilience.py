@@ -191,3 +191,58 @@ async def test_permission_issue_is_removed_with_the_entry(
     await hass.async_block_till_done()
 
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_empty_device_list_is_accepted_once_it_persists(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An instance that really was emptied is not failed forever.
+
+    The first empty responses are treated as a failed update; once the list
+    has been empty for three polls in a row it is taken at its word.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.set_devices([])
+
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+    assert hass.states.get("sensor.librenms_devices").state == STATE_UNAVAILABLE
+
+    await async_poll(hass, freezer)
+    assert hass.states.get("sensor.librenms_devices").state == "0"
+    await async_poll(hass, freezer)
+    assert hass.states.get("sensor.librenms_devices").state == "0"
+
+
+async def test_empty_device_list_at_startup_is_accepted(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """With no earlier list to contradict it, an empty one is simply empty."""
+    mock_librenms.set_devices([])
+    assert await setup_integration(hass, mock_config_entry)
+
+    assert hass.states.get("sensor.librenms_devices").state == "0"
+
+
+async def test_one_empty_device_list_does_not_reset_the_count(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Empty, good, empty is two separate blips, not a persistent empty list."""
+    await setup_integration(hass, mock_config_entry)
+    good = mock_librenms.devices
+
+    for _ in range(3):
+        mock_librenms.set_devices([])
+        await async_poll(hass, freezer)
+        assert hass.states.get("sensor.librenms_devices").state == (STATE_UNAVAILABLE)
+        mock_librenms.devices = good
+        await async_poll(hass, freezer)
+        assert hass.states.get("sensor.librenms_devices").state == "2"

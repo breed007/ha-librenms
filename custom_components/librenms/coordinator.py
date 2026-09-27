@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
+    EMPTY_DEVICE_LIST_CONFIRMATIONS,
     EVENT_ALERT,
     EVENT_TYPE_RECOVERED,
     IGNORED_SENSOR_CLASSES,
@@ -355,13 +356,26 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         # registered it. Monitored devices link to the hub through it.
         self.hub_device_id: str | None = None
 
-        # Alert id -> severity at the time we last saw it. Severity is part of
-        # the key so an escalation (warning -> critical) re-fires, while an
-        # unchanged alert stays quiet across polls. The LibreNMS state is
-        # deliberately not part of it: acknowledging an alert, or it getting
-        # worse or better, is the same open fault and must not re-fire.
-        self._seen_alerts: dict[int, str] = {}
+        # Alert events are worked out from LibreNMS's own open-alert set, never
+        # from which devices happened to come back in the same poll: a device
+        # missing from one /devices response says nothing about its faults.
+        #
+        # _known_alerts: alert id -> severity HA has already accounted for,
+        # either by firing an event or because it was open at startup.
+        # Severity is part of it so an escalation (warning -> critical)
+        # re-fires; the LibreNMS state is not, because acknowledging an alert
+        # or it getting worse or better is the same open fault.
+        # _shown_alerts: known alerts whose device was visible at some point,
+        # so a `recovered` never fires for an alert the user could not see.
+        # _alert_records: the last record /alerts returned for each known
+        # alert, so `recovered` can still name the rule and host.
+        self._known_alerts: dict[int, str] = {}
+        self._shown_alerts: set[int] = set()
+        self._alert_records: dict[int, LibreNMSAlert] = {}
         self._primed = False
+        # Consecutive polls where /devices came back empty after a poll that
+        # had devices. See _check_empty_device_list.
+        self._empty_device_polls = 0
         self._warned_large_install = False
         self._warned_implausible = False
         self._warned_hidden_alerts = False
@@ -417,6 +431,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         for result in (raw_devices, raw_alerts, raw_sensors):
             if isinstance(result, BaseException):
                 self._raise_update_error(result)
+        self._check_empty_device_list(raw_devices)
         ir.async_delete_issue(self.hass, DOMAIN, self._permission_issue_id)
 
         devices: dict[int, LibreNMSDevice] = {}
@@ -433,6 +448,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 len(devices),
             )
 
+        open_alerts: list[LibreNMSAlert] = []
         alerts: list[LibreNMSAlert] = []
         alerts_by_device: dict[int, list[LibreNMSAlert]] = {}
         hidden_alerts = 0
@@ -440,10 +456,12 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             alert = LibreNMSAlert.from_api(payload)
             if alert is None:
                 continue
+            open_alerts.append(alert)
             # /devices only lists what the token's user may see, but /alerts
-            # applies no per-device permission check at all. Keep the two
-            # consistent, or the totals would count alerts on devices no
-            # entity can show.
+            # applies no per-device permission check at all. Keep the counts
+            # consistent with the visible devices, or the totals would count
+            # alerts on devices no entity can show. Events are worked out
+            # from open_alerts instead; see _resolve_alert_deltas.
             if alert.device_id not in devices:
                 hidden_alerts += 1
                 continue
@@ -512,8 +530,40 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         )
 
         self._resolve_poller_health(data)
-        self._resolve_alert_deltas(data)
+        self._resolve_alert_deltas(data, open_alerts)
         return data
+
+    def _check_empty_device_list(self, raw_devices: list[dict[str, Any]]) -> None:
+        """Fail the update when /devices suddenly comes back empty.
+
+        One empty list right after a poll that had devices is far more
+        likely to be a fault (a permission cache being rebuilt, a database
+        hiccup) than an instance emptied between two polls. Publishing it
+        would report every device gone and every problem cleared at once, so
+        it counts as a failed update and entities go unavailable instead.
+        It is only a suspicion, though: a list that stays empty for
+        EMPTY_DEVICE_LIST_CONFIRMATIONS polls in a row is accepted, so an
+        instance that really was emptied, or a role that really lost its
+        devices, cannot keep the integration failing forever. At startup
+        there is no earlier list to contradict, so an empty one is accepted.
+        """
+        previous = self.data
+        if raw_devices or previous is None or not previous.devices:
+            self._empty_device_polls = 0
+            return
+        self._empty_device_polls += 1
+        if self._empty_device_polls >= EMPTY_DEVICE_LIST_CONFIRMATIONS:
+            _LOGGER.warning(
+                "LibreNMS has returned no devices for %s polls in a row; "
+                "accepting that the API token can no longer see any devices",
+                self._empty_device_polls,
+            )
+            self._empty_device_polls = 0
+            return
+        raise UpdateFailed(
+            f"LibreNMS returned no devices, where the previous poll had "
+            f"{len(previous.devices)}; treating this as a failed update"
+        )
 
     @property
     def _permission_issue_id(self) -> str:
@@ -601,40 +651,55 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         data.poller_stalled_for = (now - self._poll_marker_moved).total_seconds()
         data.poller_stale = data.poller_stalled_for > POLLER_STALE_AFTER
 
-    def _resolve_alert_deltas(self, data: LibreNMSData) -> None:
-        """Populate new/recovered alerts and fire bus events for each."""
-        current = {alert.alert_id: alert for alert in data.alerts}
+    def _resolve_alert_deltas(
+        self, data: LibreNMSData, open_alerts: list[LibreNMSAlert]
+    ) -> None:
+        """Populate new/recovered alerts and fire bus events for each.
+
+        `open_alerts` is everything /alerts reported as open, before the
+        visible-device filter. Only LibreNMS clearing an alert produces
+        `recovered`; a device dropping out of /devices does not, so a
+        partial response cannot page an all-clear and then re-page the same
+        fault as new once the device is back.
+        """
+        current = {alert.alert_id: alert for alert in open_alerts}
+        visible = {alert.alert_id for alert in data.alerts}
 
         if not self._primed:
             # Seed on the first successful poll so a Home Assistant restart
-            # does not replay every alert that was already open.
+            # does not replay every alert that was already open, including
+            # ones on devices that are not visible at that moment.
             self._primed = True
-            self._seen_alerts = {
+            self._known_alerts = {
                 alert_id: alert.severity for alert_id, alert in current.items()
             }
+            self._shown_alerts = set(visible)
+            self._alert_records = dict(current)
             return
 
+        data.recovered_alerts = [
+            self._alert_records[alert_id]
+            for alert_id in self._known_alerts
+            if alert_id not in current and alert_id in self._shown_alerts
+        ]
+        for alert_id in [a for a in self._known_alerts if a not in current]:
+            del self._known_alerts[alert_id]
+            self._shown_alerts.discard(alert_id)
+            self._alert_records.pop(alert_id, None)
+
+        # Only alerts the user can see are announced. One whose device is not
+        # visible stays unannounced, and fires when its device appears.
         data.new_alerts = [
             alert
-            for alert_id, alert in current.items()
-            if self._seen_alerts.get(alert_id) != alert.severity
+            for alert in data.alerts
+            if self._known_alerts.get(alert.alert_id) != alert.severity
         ]
-        # A recovered alert has left the active set, so the API no longer
-        # returns its detail — carry the record over from the previous poll.
-        previous = (
-            {alert.alert_id: alert for alert in self.data.alerts}
-            if self.data is not None
-            else {}
-        )
-        data.recovered_alerts = [
-            previous[alert_id]
-            for alert_id in self._seen_alerts
-            if alert_id not in current and alert_id in previous
-        ]
-
-        self._seen_alerts = {
-            alert_id: alert.severity for alert_id, alert in current.items()
-        }
+        for alert in data.new_alerts:
+            self._known_alerts[alert.alert_id] = alert.severity
+        self._shown_alerts |= visible
+        for alert_id, alert in current.items():
+            if alert_id in self._known_alerts:
+                self._alert_records[alert_id] = alert
 
         for alert in data.new_alerts:
             self._fire_alert_event(alert, alert.severity)

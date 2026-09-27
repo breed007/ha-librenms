@@ -71,6 +71,12 @@ LARGE_INSTALL_DEVICE_COUNT: Final = 500
 # LibreNMSUptimeSensor for why estimates only ever move earlier.
 UPTIME_DRIFT_TOLERANCE: Final = 60
 
+# An empty /devices response right after one that had devices is treated as
+# a failed update until it has repeated on this many consecutive polls. One
+# empty list is almost always a fault; three in a row means the instance, or
+# the token's view of it, really is empty.
+EMPTY_DEVICE_LIST_CONFIRMATIONS: Final = 3
+
 # Report the poller as stuck once the newest `last_polled` across the whole
 # fleet has not advanced for this long. LibreNMS polls devices every 300s by
 # default, so this allows three full cycles before crying wolf.

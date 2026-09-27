@@ -302,3 +302,170 @@ def test_alert_state_parsing(state: Any, is_open: bool, acknowledged: bool) -> N
     assert (alert is not None) is is_open
     if alert is not None:
         assert alert.acknowledged is acknowledged
+
+
+def _fired(events: list) -> list[tuple[int, str]]:
+    return [(event.data["id"], event.data["event_type"]) for event in events]
+
+
+@pytest.mark.parametrize("blip", ["empty_list", "no_devices_key"])
+async def test_one_empty_device_response_fires_nothing(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    blip: str,
+) -> None:
+    """QA's scenario: one empty /devices poll, then a normal one.
+
+    Nothing changed in LibreNMS, so no alert may recover or re-open, and the
+    problem sensor must never report an all-clear. Before the fix this fired
+    `recovered` for both alerts, turned the problem sensor off, then fired
+    both again as new.
+    """
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    good = mock_librenms.devices
+    problem_states = [hass.states.get("binary_sensor.librenms_problem").state]
+
+    if blip == "empty_list":
+        mock_librenms.set_devices([])
+    else:
+        mock_librenms.devices = {"status": "ok", "count": 0}
+    await async_poll(hass, freezer)
+    problem_states.append(hass.states.get("binary_sensor.librenms_problem").state)
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+    problem_states.append(hass.states.get("binary_sensor.librenms_problem").state)
+
+    assert _fired(events) == []
+    assert "off" not in problem_states
+    assert problem_states[-1] == "on"
+
+
+async def test_device_leaving_and_returning_fires_nothing(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A device missing from one /devices response is not a cleared fault.
+
+    Its alert stays open in LibreNMS the whole time, so there is nothing to
+    recover and nothing new when the device comes back.
+    """
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    good = mock_librenms.devices
+
+    mock_librenms.set_devices(
+        [d for d in good["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+    # While hidden, the alert drops out of the counts like any hidden alert.
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "0"
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == []
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "1"
+
+
+async def test_alert_clearing_while_its_device_is_hidden_recovers_once(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A real recovery still fires, with the detail from /alerts."""
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    good = mock_librenms.devices
+
+    mock_librenms.set_devices(
+        [d for d in good["devices"] if str(d["device_id"]) != "2"]
+    )
+    await async_poll(hass, freezer)
+    mock_librenms.set_alerts([ALERT_102])
+    await async_poll(hass, freezer)
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == [(101, "recovered")]
+    assert events[0].data["rule"] == "Device down due to no ICMP response"
+    assert events[0].data["hostname"] == "ap-garage.lan.example"
+
+
+async def test_alert_opening_while_hidden_fires_when_its_device_appears(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An alert the user has not heard about is announced once it is visible."""
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+    good = mock_librenms.devices
+
+    mock_librenms.set_devices(
+        [d for d in good["devices"] if str(d["device_id"]) != "1"]
+    )
+    mock_librenms.set_alerts([ALERT_101, ALERT_102, ALERT_103])
+    await async_poll(hass, freezer)
+    assert _fired(events) == []
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == [(103, "critical")]
+
+
+async def test_alerts_on_a_device_never_visible_never_fire(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A token that cannot see a device gets no events about it at all.
+
+    This is a Normal User without that device: /alerts still returns its
+    alerts, which open and clear without a word to Home Assistant.
+    """
+    mock_librenms.set_devices(
+        [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "2"]
+    )
+    mock_librenms.set_alerts([ALERT_102])
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.set_alerts([ALERT_101, ALERT_102])
+    await async_poll(hass, freezer)
+    mock_librenms.set_alerts([ALERT_102])
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == []
+
+
+async def test_alert_open_at_startup_on_a_hidden_device_does_not_replay(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Starting during a blip must not replay alerts once devices return."""
+    good = dict(mock_librenms.devices)
+    mock_librenms.set_devices(
+        [d for d in good["devices"] if str(d["device_id"]) != "2"]
+    )
+    await setup_integration(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_ALERT)
+
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    assert _fired(events) == []
