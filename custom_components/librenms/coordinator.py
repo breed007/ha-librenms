@@ -49,6 +49,7 @@ from .const import (
     SEVERITY_CRITICAL,
     SEVERITY_OK,
     SEVERITY_WARNING,
+    VENDOR_NAMES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -108,6 +109,10 @@ def _vendor_from_icon(value: Any) -> str | None:
     if icon is None:
         return None
     stem = icon.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    # Vendors whose names title-casing would mangle ("Apc", "Mikrotik") are
+    # spelled out in VENDOR_NAMES; everything else is title-cased.
+    if (name := VENDOR_NAMES.get(stem.lower())) is not None:
+        return name
     return _as_str(stem.replace("-", " ").replace("_", " ").title())
 
 

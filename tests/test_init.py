@@ -224,6 +224,89 @@ def test_vendor_from_icon(icon: str | None, expected: str | None) -> None:
     assert _vendor_from_icon(icon) == expected
 
 
+@pytest.mark.parametrize(
+    ("icon", "expected"),
+    [
+        # The live lab's devices (LibreNMS 26.9.1.1).
+        ("apc.svg", "APC"),
+        ("mikrotik.svg", "MikroTik"),
+        ("ubiquiti.svg", "Ubiquiti"),
+        ("synology.svg", "Synology"),
+        ("linux.svg", "Linux"),
+        # Common icons that generic title-casing gets wrong.
+        ("hpe.svg", "HPE"),
+        ("hp.svg", "HP"),
+        ("tplink.svg", "TP-Link"),
+        ("dlink.svg", "D-Link"),
+        ("zte.svg", "ZTE"),
+        ("netgear.svg", "NETGEAR"),
+        ("cyberpower.svg", "CyberPower"),
+        ("qnap.svg", "QNAP"),
+        ("truenas.svg", "TrueNAS"),
+        ("pfsense.svg", "pfSense"),
+        ("opnsense.svg", "OPNsense"),
+        ("freebsd.svg", "FreeBSD"),
+        ("redhat.svg", "Red Hat"),
+        ("images/os/alliedtelesis.png", "Allied Telesis"),
+        # Icons named after an operating system name its maker.
+        ("junos.svg", "Juniper"),
+        ("panos.svg", "Palo Alto Networks"),
+        ("cisco-old.png", "Cisco"),
+        # Anything not in the table is still title-cased.
+        ("acme-widgets.svg", "Acme Widgets"),
+    ],
+)
+def test_vendor_names_are_spelled_as_vendors_write_them(
+    icon: str, expected: str
+) -> None:
+    """QA live lab, N-4: APC is not "Apc" and MikroTik is not "Mikrotik"."""
+    from custom_components.librenms.coordinator import _vendor_from_icon
+
+    assert _vendor_from_icon(icon) == expected
+
+
+async def test_manufacturer_never_feeds_an_id(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """The manufacturer is display-only: changing it changes no id.
+
+    Device 4's icon changes between two setups. Its manufacturer follows,
+    and every unique id, entity id and device identifier stays the same.
+    """
+
+    def ids() -> set[tuple[str, str]]:
+        registry = er.async_get(hass)
+        entities = er.async_entries_for_config_entry(
+            registry, mock_config_entry.entry_id
+        )
+        devices = dr.async_entries_for_config_entry(
+            dr.async_get(hass), mock_config_entry.entry_id
+        )
+        return {(e.unique_id, e.entity_id) for e in entities} | {
+            (identifier, device.id)
+            for device in devices
+            for _, identifier in device.identifiers
+        }
+
+    await setup_integration(hass, mock_config_entry)
+    assert get_device(hass, mock_config_entry, 4).manufacturer == "MikroTik"
+    before = ids()
+
+    mock_librenms.set_devices(
+        [
+            {**d, "icon": "apc.svg"} if str(d["device_id"]) == "4" else d
+            for d in mock_librenms.devices["devices"]
+        ]
+    )
+    await hass.config_entries.async_reload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert get_device(hass, mock_config_entry, 4).manufacturer == "APC"
+    assert ids() == before
+
+
 async def test_auth_failure_triggers_reauth(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
