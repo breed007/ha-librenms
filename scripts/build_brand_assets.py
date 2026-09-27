@@ -41,7 +41,7 @@ except ImportError as err:  # pragma: no cover - developer tooling
 SOURCE_BASE = "https://raw.githubusercontent.com/librenms/librenms/master/html/images"
 
 # LibreNMS names its files for the background they sit on: `_light` artwork is
-# dark grey and belongs on a white background, `_dark` artwork is white and
+# dark gray and belongs on a white background, `_dark` artwork is white and
 # belongs on a dark one. Home Assistant uses the opposite convention -- the
 # unprefixed name is the light-background image, and `dark_` is for dark
 # backgrounds -- so the mapping below is intentionally crossed over.
@@ -72,7 +72,7 @@ class Target:
 
 # Icons must be exactly square: 256 and 512. Logos keep the brand's aspect
 # ratio, with the shortest side in 128-256 (standard) and 256-512 (@2x).
-# Home Assistant recognises exactly these eight filenames.
+# Home Assistant recognizes exactly these eight filenames.
 TARGETS: tuple[Target, ...] = (
     Target("icon.png", ICON_LIGHT_BG, 256, True),
     Target("icon@2x.png", ICON_LIGHT_BG, 512, True),
@@ -96,7 +96,7 @@ def fetch_sources(destination: Path) -> None:
 
 
 def render(svg_path: Path, height: int) -> Image.Image:
-    """Rasterise an SVG at `height` pixels and trim its transparent border."""
+    """Rasterize an SVG at `height` pixels and trim its transparent border."""
     png = resvg_py.svg_to_bytes(svg_path=str(svg_path), height=height)
     image = Image.open(io.BytesIO(bytes(png))).convert("RGBA")
 
@@ -108,7 +108,7 @@ def render(svg_path: Path, height: int) -> Image.Image:
 
 
 def build_square(svg_path: Path, size: int) -> Image.Image:
-    """Return the mark centred on a transparent square canvas."""
+    """Return the mark centered on a transparent square canvas."""
     art = render(svg_path, size * SUPERSAMPLE)
 
     scale = size / max(art.width, art.height)
@@ -130,7 +130,7 @@ def build_wide(svg_path: Path, height: int) -> Image.Image:
 
 
 def encode(image: Image.Image) -> bytes:
-    """Return interlaced, losslessly optimised PNG bytes."""
+    """Return interlaced, losslessly optimized PNG bytes."""
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return oxipng.optimize_from_memory(

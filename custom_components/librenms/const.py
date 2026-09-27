@@ -56,7 +56,7 @@ SEVERITY_CRITICAL: Final = "critical"
 SEVERITY_WARNING: Final = "warning"
 SEVERITY_OK: Final = "ok"
 
-# Cap on the number of alerts serialised into a state attribute. The recorder
+# Cap on the number of alerts serialized into a state attribute. The recorder
 # stores every attribute change, so an unbounded list on a busy instance will
 # bloat the database.
 MAX_ALERT_ATTRIBUTES: Final = 50

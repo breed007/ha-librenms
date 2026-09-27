@@ -35,7 +35,7 @@ class LibreNMSAlertEvent(LibreNMSEntity, EventEntity):
     _attr_translation_key = "alerts"
 
     def __init__(self, coordinator: LibreNMSDataUpdateCoordinator) -> None:
-        """Initialise the event entity."""
+        """Initialize the event entity."""
         super().__init__(coordinator, "alerts")
 
     @callback

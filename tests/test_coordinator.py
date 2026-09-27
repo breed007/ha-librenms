@@ -78,7 +78,7 @@ def test_as_bool(value: Any, expected: bool) -> None:
     [("text", "text"), ("  text  ", "text"), ("", None), ("   ", None), (None, None)],
 )
 def test_as_str(value: Any, expected: str | None) -> None:
-    """Empty strings are normalised to None so they do not show as blanks."""
+    """Empty strings are normalized to None so they do not show as blanks."""
     assert _as_str(value) == expected
 
 
@@ -110,8 +110,8 @@ def test_alert_without_id_is_dropped() -> None:
         ("something-new", "ok"),
     ],
 )
-def test_alert_severity_is_normalised(severity: Any, expected: str) -> None:
-    """An unrecognised severity degrades to ok rather than breaking counts."""
+def test_alert_severity_is_normalized(severity: Any, expected: str) -> None:
+    """An unrecognized severity degrades to ok rather than breaking counts."""
     alert = LibreNMSAlert.from_api({"id": 1, "severity": severity})
     assert alert is not None
     assert alert.severity == expected

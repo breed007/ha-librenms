@@ -269,7 +269,7 @@ class LibreNMSInstanceSensor(LibreNMSEntity, SensorEntity):
         coordinator: LibreNMSDataUpdateCoordinator,
         description: LibreNMSSensorDescription,
     ) -> None:
-        """Initialise the sensor."""
+        """Initialize the sensor."""
         super().__init__(coordinator, description.key)
         self.entity_description = description
 
@@ -297,7 +297,7 @@ class LibreNMSDeviceSensor(LibreNMSDeviceEntity, SensorEntity):
         device_id: int,
         description: LibreNMSDeviceSensorDescription,
     ) -> None:
-        """Initialise the sensor."""
+        """Initialize the sensor."""
         super().__init__(coordinator, device_id, description.key)
         self.entity_description = description
 
@@ -396,7 +396,7 @@ class LibreNMSHealthSensor(LibreNMSDeviceEntity, SensorEntity):
         device_id: int,
         sensor_id: int,
     ) -> None:
-        """Initialise from the sensor's current definition."""
+        """Initialize from the sensor's current definition."""
         super().__init__(coordinator, device_id, f"sensor_{sensor_id}")
         self._sensor_id = sensor_id
 

@@ -227,7 +227,7 @@ class LibreNMSAlert:
         )
 
     def as_dict(self) -> dict[str, Any]:
-        """Return a serialisable form for state attributes and bus events."""
+        """Return a serializable form for state attributes and bus events."""
         return {
             "id": self.alert_id,
             "device_id": self.device_id,
@@ -341,7 +341,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
     config_entry: LibreNMSConfigEntry
 
     def __init__(self, hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
-        """Initialise the coordinator from a config entry."""
+        """Initialize the coordinator from a config entry."""
         self.client = LibreNMSClient(
             async_get_clientsession(
                 hass,

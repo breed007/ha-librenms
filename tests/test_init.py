@@ -1,4 +1,4 @@
-"""Tests for LibreNMS setup, teardown and coordinator behaviour."""
+"""Tests for LibreNMS setup, teardown and coordinator behavior."""
 
 from __future__ import annotations
 
@@ -250,7 +250,7 @@ async def test_entities_recover_after_outage(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Entities go unavailable during an outage and come back afterwards."""
+    """Entities go unavailable during an outage and come back afterward."""
     await setup_integration(hass, mock_config_entry)
     assert hass.states.get("sensor.librenms_devices").state == "2"
 

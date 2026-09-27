@@ -35,7 +35,7 @@ ALERT_102 = {
     "device_id": "1",
     "hostname": "core-sw01.lan.example",
     "rule_id": "12",
-    "name": "Port utilisation over 80%",
+    "name": "Port utilization over 80%",
     "state": "1",
     "severity": "warning",
     "timestamp": "2025-07-28 08:55:00",

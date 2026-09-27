@@ -44,7 +44,7 @@ class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
     _attr_translation_key = "problem"
 
     def __init__(self, coordinator: LibreNMSDataUpdateCoordinator) -> None:
-        """Initialise the binary sensor."""
+        """Initialize the binary sensor."""
         super().__init__(coordinator, "problem")
 
     @property
@@ -91,7 +91,7 @@ class LibreNMSPollerStaleBinarySensor(LibreNMSEntity, BinarySensorEntity):
     _attr_translation_key = "poller_stale"
 
     def __init__(self, coordinator: LibreNMSDataUpdateCoordinator) -> None:
-        """Initialise the binary sensor."""
+        """Initialize the binary sensor."""
         super().__init__(coordinator, "poller_stale")
 
     @property
@@ -118,7 +118,7 @@ class LibreNMSDeviceStatusBinarySensor(LibreNMSDeviceEntity, BinarySensorEntity)
     def __init__(
         self, coordinator: LibreNMSDataUpdateCoordinator, device_id: int
     ) -> None:
-        """Initialise the binary sensor."""
+        """Initialize the binary sensor."""
         super().__init__(coordinator, device_id, "status")
 
     @property

@@ -23,7 +23,7 @@
       "device_id": "1",
       "hostname": "core-sw01.lan.example",
       "rule_id": "12",
-      "name": "Port utilisation over 80%",
+      "name": "Port utilization over 80%",
       "severity": "warning",
       "state": "1",
       "alerted": "1",

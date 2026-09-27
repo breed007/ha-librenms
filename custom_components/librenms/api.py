@@ -113,7 +113,7 @@ class LibreNMSClient:
     """Minimal read-only client for the endpoints this integration needs."""
 
     def __init__(self, session: ClientSession, url: str, token: str) -> None:
-        """Initialise the client against a normalized base URL."""
+        """Initialize the client against a normalized base URL."""
         self._session = session
         self._base_url = normalize_url(url)
         self._token = token

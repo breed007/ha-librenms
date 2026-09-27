@@ -18,7 +18,7 @@ class LibreNMSEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: LibreNMSDataUpdateCoordinator, key: str) -> None:
-        """Initialise an instance-level entity."""
+        """Initialize an instance-level entity."""
         super().__init__(coordinator)
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{entry_id}_{key}"
@@ -38,7 +38,7 @@ class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
         device_id: int,
         key: str,
     ) -> None:
-        """Initialise a per-device entity."""
+        """Initialize a per-device entity."""
         super().__init__(coordinator)
         self._device_id = device_id
         entry_id = coordinator.config_entry.entry_id
