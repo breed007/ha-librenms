@@ -108,26 +108,83 @@ async def test_client_never_sends_the_token_to_a_redirect(servers: _Servers) -> 
     ("location", "expected"),
     [
         # The instance moved: suggest the base URL to enter.
-        ("https://librenms.example.com/api/v0/system", "https://librenms.example.com"),
+        (
+            "https://librenms.example.com/api/v0/system",
+            "https://librenms.example.com",
+        ),
         (
             "https://nms.example.com/librenms/api/v0/system",
             "https://nms.example.com/librenms",
         ),
         # A relative redirect resolves against the request.
         ("/librenms/api/v0/system", "http://10.0.0.5/librenms"),
-        # Anything else is reported as is.
+        ("//nms.example.com/api/v0/system", "http://nms.example.com"),
+        # Anything else is reported without its query or fragment.
+        ("https://sso.example.com/login?next=/#top", "https://sso.example.com/login"),
+        # Credentials in a Location never reach the form or the log.
         (
-            "https://sso.example.com/login?next=/",
-            "https://sso.example.com/login?next=/",
+            "https://admin:s3cret@librenms.example.com/api/v0/system",
+            "https://librenms.example.com",
         ),
+        (
+            "https://admin:s3cret@sso.example.com/login?token=abc123",
+            "https://sso.example.com/login",
+        ),
+        # Unusable headers get an honest description, not a wrong address.
         (None, "an unnamed location"),
+        ("   ", "an unnamed location"),
+        ("http://[::1", "an address that could not be read"),
     ],
 )
 def test_redirect_target(location: str | None, expected: str) -> None:
-    """The error names an address the user can act on."""
+    """The error names an address the user can act on, and nothing secret."""
     assert _redirect_target("http://10.0.0.5/api/v0/system", location, "system") == (
         expected
     )
+
+
+async def test_unreadable_location_is_still_reported_as_a_redirect(
+    hass: HomeAssistant, mock_librenms: MockLibreNMS
+) -> None:
+    """A malformed Location used to surface as "invalid JSON" and `unknown`."""
+    _redirect_system(mock_librenms, "http://[::1")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: BASE_URL, CONF_API_TOKEN: TOKEN, CONF_VERIFY_SSL: True},
+    )
+
+    assert result["errors"] == {"base": "redirected"}
+    assert result["description_placeholders"]["redirect_url"] == (
+        "an address that could not be read"
+    )
+
+
+async def test_credentials_in_a_location_stay_out_of_the_log(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A running entry logs the redirect without its user name or password."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail(
+        "devices",
+        status=302,
+        text="",
+        headers={"Location": "https://admin:s3cret@sso.example.com/login?t=abc"},
+    )
+
+    await async_poll(hass, freezer)
+
+    assert "redirected to https://sso.example.com/login" in caplog.text
+    assert "s3cret" not in caplog.text
+    assert "admin" not in caplog.text
+    assert "t=abc" not in caplog.text
 
 
 def _redirect_system(mock_librenms: MockLibreNMS, location: str) -> None:

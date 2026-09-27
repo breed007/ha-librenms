@@ -272,15 +272,26 @@ def _redirect_target(request_url: str, location: str | None, endpoint: str) -> s
     A redirect for `/api/v0/system` to `https://host/api/v0/system` is the
     instance moving (http to https, a new name); report the base URL the
     user should enter. Anything else, such as a login portal, is reported
-    as is.
+    without its query.
+
+    The result ends up in the config flow and the log, so it never carries
+    a user name, password, query string or fragment from the Location
+    header: any of them can hold credentials or tokens.
     """
+    location = (location or "").strip()
     if not location:
         return "an unnamed location"
-    target = URL(request_url).join(URL(location))
+    try:
+        target = URL(request_url).join(URL(location))
+        if target.absolute:
+            target = target.with_user(None)
+        target = target.with_query(None).with_fragment(None)
+    except ValueError:
+        return "an address that could not be read"
     suffix = f"{API_PATH}/{endpoint.lstrip('/')}"
     path = target.path.rstrip("/")
     if target.scheme in ("http", "https") and path.endswith(suffix):
-        base = target.with_path(path[: -len(suffix)] or "/").with_query(None)
+        base = target.with_path(path[: -len(suffix)] or "/")
         with suppress(ValueError):
             return normalize_url(str(base))
     return str(target)
