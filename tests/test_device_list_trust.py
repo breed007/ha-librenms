@@ -443,3 +443,57 @@ async def test_deleting_the_stale_device_releases_its_alert(
     await hass.config_entries.async_reload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     assert hass.states.get(PROBLEM).state == "off"
+
+
+async def test_stalled_poller_stays_a_problem_through_an_empty_list(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA round 3, F7: no poll times to judge is not "the poller is fine".
+
+    The stalled poller is the only problem here. While the device list is
+    empty there is nothing to judge, so the last judgment carries over
+    instead of flapping the problem sensor off and back on.
+    """
+    mock_librenms.set_devices(
+        [{**d, "status": 1} for d in mock_librenms.devices["devices"]]
+    )
+    mock_librenms.set_alerts([])
+    await setup_integration(hass, mock_config_entry)
+    good = mock_librenms.devices
+    await async_poll(hass, freezer, seconds=901)
+    assert hass.states.get(PROBLEM).state == "on"
+    problem = _record(hass, PROBLEM)
+    stale = _record(hass, "binary_sensor.librenms_poller_stale")
+
+    await _polls(hass, freezer, mock_librenms, "EEEE", good)
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
+    mock_librenms.devices = good
+    await async_poll(hass, freezer)
+
+    assert "off" not in problem
+    assert "off" not in stale
+    assert hass.states.get(PROBLEM).state == "on"
+
+
+async def test_empty_list_does_not_invent_a_stalled_poller(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Carrying the last judgment over works both ways: off stays off.
+
+    An emptied instance has no poll times at all; that must not turn into
+    a stale-poller alarm 15 minutes later.
+    """
+    await setup_integration(hass, mock_config_entry)
+    good = mock_librenms.devices
+    await _polls(hass, freezer, mock_librenms, "EEE", good)
+    for _ in range(20):
+        mock_librenms.set_devices([])
+        await async_poll(hass, freezer)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"

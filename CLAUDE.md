@@ -80,7 +80,8 @@ all-clear, and they are deliberately independent of each other:
    never clears a fault LibreNMS still has open.
 
 A missing `last_polled` (no devices to read it from) is "nothing to judge"
-for the stale-poller check, never "the poller moved".
+for the stale-poller check, never "the poller moved": the stall timer keeps
+running and the previous stale judgment carries over until poll times return.
 
 ### Errors
 

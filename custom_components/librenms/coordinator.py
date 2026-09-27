@@ -732,8 +732,16 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         if marker is None:
             # Nothing reports a poll time, so there is nothing to judge. That
             # is not the poller moving either: keep the last marker, so a
-            # stretch without devices does not restart the stall timer.
+            # stretch without devices does not restart the stall timer. The
+            # last judgment carries over, so a stalled poller that is the only
+            # problem does not flap off and on while the list is empty, and a
+            # healthy one is not declared stalled for want of evidence.
             data.poller_last_advanced = self._poll_marker
+            if self._poll_marker_moved is not None:
+                data.poller_stalled_for = (
+                    now - self._poll_marker_moved
+                ).total_seconds()
+            data.poller_stale = self.data.poller_stale if self.data else False
             return
 
         if marker != self._poll_marker or self._poll_marker_moved is None:

@@ -342,7 +342,9 @@ be checked without a clock at all.
 
 The sensor turns on when the newest poll time has not moved for 15 minutes,
 which is three full cycles at LibreNMS's default 300 s poll interval.
-Attributes report `last_advanced` and `stalled_for_seconds`.
+Attributes report `last_advanced` and `stalled_for_seconds`. While LibreNMS
+lists no devices there are no poll times to judge, so the sensor keeps its
+previous state until devices return.
 
 ---
 
