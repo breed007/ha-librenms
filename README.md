@@ -162,7 +162,8 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 | `sensor.<device>_<sensor>` | sensor | One per LibreNMS health sensor — see below |
 
 Devices added in LibreNMS appear on the next poll without reloading the
-integration. Devices removed from LibreNMS go unavailable, and can then be
+integration, and so do health sensors added to a device Home Assistant
+already knows (a new disk, or a sensor LibreNMS rediscovered under a new id). Devices removed from LibreNMS go unavailable, and can then be
 deleted from the Home Assistant device page.
 
 ### Health sensors

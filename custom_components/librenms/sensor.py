@@ -42,7 +42,12 @@ from .coordinator import (
     LibreNMSDevice,
     LibreNMSSensor,
 )
-from .entity import LibreNMSDeviceEntity, LibreNMSEntity, async_setup_device_entities
+from .entity import (
+    LibreNMSDeviceEntity,
+    LibreNMSEntity,
+    async_add_new_entities,
+    async_setup_device_entities,
+)
 
 SEVERITY_ORDER = {SEVERITY_CRITICAL: 0, SEVERITY_WARNING: 1, SEVERITY_OK: 2}
 
@@ -229,13 +234,29 @@ async def async_setup_entry(
             for description in DEVICE_SENSORS
         ]
         entities.append(LibreNMSUptimeSensor(coordinator, device_id))
-        entities.extend(
-            LibreNMSHealthSensor(coordinator, device_id, sensor.sensor_id)
-            for sensor in coordinator.data.sensors_by_device.get(device_id, [])
-        )
         return entities
 
     async_setup_device_entities(coordinator, async_add_entities, _build)
+
+    # Health sensors are tracked per (device, sensor) rather than per device.
+    # A known device still gains sensors: a new disk in a NAS, or LibreNMS
+    # rediscovering a sensor under a new id.
+    async_add_new_entities(
+        coordinator,
+        async_add_entities,
+        _health_sensor_keys,
+        lambda key: [LibreNMSHealthSensor(coordinator, *key)],
+    )
+
+
+def _health_sensor_keys(data: LibreNMSData) -> set[tuple[int, int]]:
+    """Return (device_id, sensor_id) for every sensor on a visible device."""
+    return {
+        (device_id, sensor.sensor_id)
+        for device_id, sensors in data.sensors_by_device.items()
+        if device_id in data.devices
+        for sensor in sensors
+    }
 
 
 class LibreNMSInstanceSensor(LibreNMSEntity, SensorEntity):

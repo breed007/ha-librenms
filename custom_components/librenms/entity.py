@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Hashable, Iterable
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import LibreNMSDataUpdateCoordinator, LibreNMSDevice
+from .coordinator import LibreNMSData, LibreNMSDataUpdateCoordinator, LibreNMSDevice
 
 
 class LibreNMSEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
@@ -72,6 +72,36 @@ class LibreNMSDeviceEntity(CoordinatorEntity[LibreNMSDataUpdateCoordinator]):
         return super().available and self.device is not None
 
 
+def async_add_new_entities[KeyT: Hashable](
+    coordinator: LibreNMSDataUpdateCoordinator,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+    keys: Callable[[LibreNMSData], Iterable[KeyT]],
+    build: Callable[[KeyT], Iterable[CoordinatorEntity]],
+) -> None:
+    """Add entities for every key seen now, and for new keys on later polls.
+
+    `keys` names what an entity is created for (a device id, a device and
+    sensor pair) and `build` creates the entities for one key. Each key is
+    built exactly once, so a key that disappears and comes back reuses its
+    existing entity instead of creating a duplicate.
+    """
+    known: set[KeyT] = set()
+
+    def _add_new() -> None:
+        new_keys = set(keys(coordinator.data)) - known
+        if not new_keys:
+            return
+        known.update(new_keys)
+        entities: list[CoordinatorEntity] = []
+        for key in sorted(new_keys):
+            entities.extend(build(key))
+        if entities:
+            async_add_entities(entities)
+
+    _add_new()
+    coordinator.config_entry.async_on_unload(coordinator.async_add_listener(_add_new))
+
+
 def async_setup_device_entities(
     coordinator: LibreNMSDataUpdateCoordinator,
     async_add_entities: AddConfigEntryEntitiesCallback,
@@ -83,19 +113,6 @@ def async_setup_device_entities(
     device would stay invisible in Home Assistant until the entry was
     reloaded.
     """
-    known: set[int] = set()
-
-    def _add_new_devices() -> None:
-        new_ids = set(coordinator.data.devices) - known
-        if not new_ids:
-            return
-        known.update(new_ids)
-        entities: list[CoordinatorEntity] = []
-        for device_id in sorted(new_ids):
-            entities.extend(build(device_id))
-        async_add_entities(entities)
-
-    _add_new_devices()
-    coordinator.config_entry.async_on_unload(
-        coordinator.async_add_listener(_add_new_devices)
+    async_add_new_entities(
+        coordinator, async_add_entities, lambda data: data.devices, build
     )

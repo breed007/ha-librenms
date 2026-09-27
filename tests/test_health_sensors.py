@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
@@ -10,7 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.librenms.coordinator import LibreNMSSensor
 
-from .conftest import MockLibreNMS, setup_integration
+from .conftest import MockLibreNMS, async_poll, setup_integration
 
 
 def test_scaling_is_not_reapplied() -> None:
@@ -133,3 +136,121 @@ async def test_health_sensor_recovers_when_the_reading_returns(
     await async_poll(hass, freezer)
 
     assert hass.states.get("sensor.garage_ap_temp1").state == "39.5"
+
+
+def _sensor_row(
+    sensor_id: int, device_id: int, descr: str, value: float
+) -> dict[str, Any]:
+    """A sensor row shaped like LibreNMS's /resources/sensors output."""
+    return {
+        "sensor_id": sensor_id,
+        "device_id": device_id,
+        "sensor_class": "temperature",
+        "sensor_type": "entity-sensor",
+        "sensor_descr": descr,
+        "sensor_index": str(sensor_id),
+        "sensor_current": value,
+        "sensor_limit": 60,
+        "sensor_limit_low": 30,
+        "sensor_divisor": 1,
+        "sensor_multiplier": 1,
+        "sensor_deleted": 0,
+        "poller_type": "snmp",
+    }
+
+
+def _health_unique_ids(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
+    return [
+        e.unique_id
+        for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if "_sensor_" in e.unique_id
+    ]
+
+
+async def test_new_sensor_on_a_known_device_gets_an_entity(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A disk added to a device HA already knows appears on the next poll."""
+    await setup_integration(hass, mock_config_entry)
+    before = _health_unique_ids(hass, mock_config_entry)
+
+    sensors = [dict(s) for s in mock_librenms.sensors["sensors"]]
+    sensors.append(_sensor_row(99, 1, "New disk", 38))
+    mock_librenms.set_sensors(sensors)
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("sensor.core_sw01_new_disk").state == "38.0"
+    after = _health_unique_ids(hass, mock_config_entry)
+    assert sorted(after) == sorted(
+        [*before, f"{mock_config_entry.entry_id}_1_sensor_99"]
+    )
+    assert len(after) == len(set(after))
+
+
+async def test_rediscovered_sensor_gets_a_new_entity_and_the_old_one_goes_away(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """LibreNMS rediscovery can reissue a sensor under a new sensor_id."""
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get("sensor.core_sw01_system").state == "45.0"
+
+    sensors = [
+        _sensor_row(111, 1, "System", 46) if s["sensor_id"] == 11 else dict(s)
+        for s in mock_librenms.sensors["sensors"]
+    ]
+    mock_librenms.set_sensors(sensors)
+    await async_poll(hass, freezer)
+
+    registry = er.async_get(hass)
+    new_id = registry.async_get_entity_id(
+        "sensor", "librenms", f"{mock_config_entry.entry_id}_1_sensor_111"
+    )
+    assert new_id is not None
+    assert hass.states.get(new_id).state == "46.0"
+    assert hass.states.get("sensor.core_sw01_system").state == STATE_UNAVAILABLE
+
+
+async def test_sensor_that_returns_is_not_duplicated(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A sensor missing for a poll reuses its entity when it comes back."""
+    await setup_integration(hass, mock_config_entry)
+    before = _health_unique_ids(hass, mock_config_entry)
+    original = [dict(s) for s in mock_librenms.sensors["sensors"]]
+
+    mock_librenms.set_sensors([s for s in original if s["sensor_id"] != 11])
+    await async_poll(hass, freezer)
+    assert hass.states.get("sensor.core_sw01_system").state == STATE_UNAVAILABLE
+
+    mock_librenms.set_sensors(original)
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("sensor.core_sw01_system").state == "45.0"
+    assert sorted(_health_unique_ids(hass, mock_config_entry)) == sorted(before)
+
+
+async def test_sensors_missing_at_startup_are_created_when_they_arrive(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Sensors that failed during setup get entities once they load."""
+    mock_librenms.fail("sensors", status=500)
+    await setup_integration(hass, mock_config_entry)
+    assert _health_unique_ids(hass, mock_config_entry) == []
+
+    mock_librenms.recover("sensors")
+    await async_poll(hass, freezer)
+
+    assert hass.states.get("sensor.core_sw01_system").state == "45.0"
