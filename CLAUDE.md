@@ -129,6 +129,23 @@ same filtering LibreNMS does.**
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.
 - **The vendor** comes from the `icon` filename, not `os`.
+- **API tokens changed twice in 2026** (verified in LibreNMS source at the
+  tags named; the README's token setup depends on this):
+  - Before 26.4.0: `/api-access` (menu "API Settings") lets an account with
+    `api.access` (admins) create a legacy token for any user from a picker.
+  - 26.4.0 to 26.8.x: `/api-access` (menu "API Tokens") is self-service only
+    (`ApiAccessController`). v0 still authenticates legacy tokens only
+    (`auth:token` guard, `ApiToken::isValid`). `lnms api:token-create`
+    arrives in 26.8.0 but makes a Sanctum token, which v0 rejects there.
+  - 26.9.0 on: v0 uses `auth:sanctum` and reads `X-Auth-Token` for
+    `api/v0*`; legacy tokens were migrated to Sanctum by hash, so old tokens
+    keep working. `lnms api:token-create <username> [--name=<label>]` works;
+    tokens do not expire (`sanctum.expiration` is null).
+  - `api.access` gates only the token page and its menu entry, never the REST
+    API. Global Read does not get it (`Gate::before` grants only
+    `*.view`/`viewAll`/`viewAny`), and the seeded roles carry no permissions.
+  - Disabling a user stops its tokens from 26.8.0 (checked in 26.8.0 and
+    26.9.x) but not at 26.4.0, so don't document that as a revocation step.
 - **Redirects:** aiohttp strips `Authorization` and cookies on a cross-origin
   redirect but not `X-Auth-Token`. Requests use `allow_redirects=False`.
 

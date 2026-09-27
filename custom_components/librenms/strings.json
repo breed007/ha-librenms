@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to LibreNMS",
-        "description": "Enter the URL of your LibreNMS instance and an API token. Create the token in LibreNMS under Settings → API → API Access, for a dedicated user with the Global Read role. A Normal User only sees devices assigned to it directly or through a device group, which is usually none.",
+        "description": "Enter the URL of your LibreNMS instance and an API token. The token should belong to a dedicated LibreNMS user with the Global Read role. How to create one depends on your LibreNMS version; the integration's README has the steps. A Normal User only sees devices assigned to it directly or through a device group, which is usually none.",
         "data": {
           "url": "URL",
           "api_token": "API token",
@@ -11,7 +11,7 @@
         },
         "data_description": {
           "url": "The base address of your LibreNMS instance. Subpaths are supported, and the API path is added for you. If you leave out the scheme, https is used.",
-          "api_token": "The token value shown in LibreNMS API Access.",
+          "api_token": "The token LibreNMS showed when it was created. LibreNMS shows it only once.",
           "verify_ssl": "Turn this off only if your instance uses a self-signed certificate."
         }
       },
@@ -41,7 +41,7 @@
       "cannot_connect": "Failed to connect. Check the URL, that the instance is reachable from Home Assistant, and the SSL setting.",
       "cannot_connect_https_assumed": "Could not connect to {url}. No scheme was entered, so https was used. If your instance only serves plain http, enter {http_url} instead, knowing that the API token will then cross your network unencrypted. If it uses a self-signed certificate, turn off certificate verification instead.",
       "insufficient_permissions": "LibreNMS accepted the API token, but its user is not allowed to list devices. Give that user the Global Read role.",
-      "invalid_auth": "LibreNMS rejected the API token. Check that it still exists under Settings → API → API Access.",
+      "invalid_auth": "LibreNMS rejected the API token. Check that the token still exists and that the LibreNMS user it belongs to is enabled. On LibreNMS 26.8, tokens created with the lnms command or as v1 tokens are not accepted by the API this integration uses.",
       "invalid_url": "That does not look like a valid URL.",
       "redirected": "LibreNMS answered with a redirect to {redirect_url} instead of the API. If that is the address of your LibreNMS instance, enter it as the URL. The API token is never sent to a redirected address.",
       "redirected_reauth": "LibreNMS answered with a redirect to {redirect_url} instead of the API, so a new token will not help. If your LibreNMS instance has moved, close this dialog and use Reconfigure on the LibreNMS integration to change its URL, and its token if needed. The API token is never sent to a redirected address.",
@@ -137,7 +137,7 @@
   "issues": {
     "insufficient_permissions": {
       "title": "LibreNMS API token lacks permission",
-      "description": "LibreNMS at {url} accepted the API token but refused to return devices or alerts (HTTP 403). The user the token belongs to needs the Global Read role. Change it in LibreNMS under Settings → Manage → Users. The integration recovers on its own at the next update; there is no need to enter a new token."
+      "description": "LibreNMS at {url} accepted the API token but refused to return devices or alerts (HTTP 403). The user the token belongs to needs the Global Read role. Change it in LibreNMS on the Manage Users page. The integration recovers on its own at the next update; there is no need to enter a new token."
     }
   }
 }
