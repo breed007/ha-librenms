@@ -69,6 +69,12 @@ STEP_RECONFIGURE_SCHEMA = vol.Schema(
         vol.Required(CONF_URL): TextSelector(
             TextSelectorConfig(type=TextSelectorType.URL)
         ),
+        # Optional: blank keeps the stored token. A new one is needed when
+        # moving to a different LibreNMS instance, which the old token will
+        # not work on and which reauth cannot reach.
+        vol.Optional(CONF_API_TOKEN): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
         vol.Required(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
     }
 )
@@ -237,7 +243,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change the URL or certificate verification of an existing entry.
+        """Change the URL, token or certificate verification of an entry.
 
         Keeps the same config entry, so entity ids and history survive; they
         are keyed on the entry id, which delete and re-add would change.
@@ -257,9 +263,12 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(base_url)
                     self._abort_if_unique_id_configured()
 
+                token = (user_input.get(CONF_API_TOKEN) or "").strip() or entry.data[
+                    CONF_API_TOKEN
+                ]
                 errors, placeholders = await self._async_validate(
                     base_url,
-                    entry.data[CONF_API_TOKEN],
+                    token,
                     user_input[CONF_VERIFY_SSL],
                     https_assumed=not has_scheme(user_input[CONF_URL]),
                 )
@@ -276,6 +285,7 @@ class LibreNMSConfigFlow(ConfigFlow, domain=DOMAIN):
                         title=title,
                         data_updates={
                             CONF_URL: base_url,
+                            CONF_API_TOKEN: token,
                             CONF_VERIFY_SSL: user_input[CONF_VERIFY_SSL],
                         },
                     )

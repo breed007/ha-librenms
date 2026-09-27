@@ -611,3 +611,74 @@ async def test_reconfigure_bare_host_gets_the_https_hint(
 
     assert result["errors"] == {"base": "cannot_connect_https_assumed"}
     assert result["description_placeholders"]["http_url"] == "http://10.0.0.5"
+
+
+async def test_reconfigure_can_move_to_a_new_instance_with_a_new_token(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A different instance needs a different token; the entry is kept."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_URL: NEW_URL,
+            CONF_API_TOKEN: " new-instance-token ",
+            CONF_VERIFY_SSL: True,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.data == {
+        CONF_URL: NEW_URL,
+        CONF_API_TOKEN: "new-instance-token",
+        CONF_VERIFY_SSL: True,
+    }
+    # The new instance was checked with the new token, not the old one.
+    sent = {call[3]["X-Auth-Token"] for call in aioclient_mock.mock_calls}
+    assert sent == {"new-instance-token"}
+
+
+@pytest.mark.parametrize("blank", [None, "", "   "])
+async def test_reconfigure_blank_token_keeps_the_current_one(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    blank: str | None,
+) -> None:
+    """Leaving the token field empty is not the same as clearing the token."""
+    mock_config_entry.add_to_hass(hass)
+    user_input = {CONF_URL: NEW_URL, CONF_VERIFY_SSL: True}
+    if blank is not None:
+        user_input[CONF_API_TOKEN] = blank
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.data[CONF_API_TOKEN] == TOKEN
+
+
+async def test_reconfigure_rejected_new_token_is_not_saved(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A token the new instance refuses stays out of the entry."""
+    mock_config_entry.add_to_hass(hass)
+    mock_librenms.status = 401
+
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: NEW_URL, CONF_API_TOKEN: "wrong", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert mock_config_entry.data[CONF_API_TOKEN] == TOKEN
+    assert mock_config_entry.data[CONF_URL] == BASE_URL
