@@ -42,12 +42,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> 
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> bool:
-    """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Unload a config entry.
+
+    The permission repair goes with it: a disabled or unloaded entry is not
+    polling, so it has nothing to report. A reload raises it again on the
+    next update if the role is still wrong.
+    """
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        _delete_permission_issue(hass, entry)
+    return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
     """Drop any repair issue left behind by a removed entry."""
+    _delete_permission_issue(hass, entry)
+
+
+def _delete_permission_issue(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
+    """Remove the entry's insufficient-permissions repair, if raised."""
     ir.async_delete_issue(
         hass, DOMAIN, f"{ISSUE_INSUFFICIENT_PERMISSIONS}_{entry.entry_id}"
     )

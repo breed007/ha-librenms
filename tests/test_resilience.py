@@ -269,3 +269,22 @@ async def test_401_wins_over_403_in_the_same_poll(
     await async_poll(hass, freezer)
 
     assert len(_reauth_flows(hass)) == 1
+
+
+async def test_permission_issue_is_removed_when_the_entry_unloads(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Disabling or unloading the entry does not leave a stale repair behind."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail("devices", status=403)
+    await async_poll(hass, freezer)
+    issue_id = f"insufficient_permissions_{mock_config_entry.entry_id}"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
