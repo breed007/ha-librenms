@@ -10,8 +10,10 @@ import re
 from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.setup import async_setup_component
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -21,6 +23,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
     AiohttpClientMockResponse,
 )
+from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.librenms.const import DOMAIN
 
@@ -219,3 +222,37 @@ def get_device(
     return dr.async_get(hass).async_get_device_by_identifier(
         (DOMAIN, identifier), entry.entry_id
     )
+
+
+# The Delete button on a device page sends `config/device_registry/remove`
+# from Home Assistant 2026.9. Earlier releases only have
+# `remove_config_entry`, which 2026.9 keeps as a deprecated alias until
+# 2027.9. Both end in the integration's async_remove_config_entry_device.
+REMOVE_DEVICE = "config/device_registry/remove"
+REMOVE_DEVICE_LEGACY = "config/device_registry/remove_config_entry"
+
+
+async def remove_device(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    entry: MockConfigEntry,
+    device: dr.DeviceEntry,
+) -> dict[str, Any]:
+    """Delete a device the way the device page's Delete button does.
+
+    Sends whichever command this Home Assistant registers, so the test
+    exercises the real request on every version in the matrix without
+    tripping the deprecation warning on newer ones. Returns the response.
+    """
+    assert await async_setup_component(hass, "config", {})
+    client = await hass_ws_client(hass)
+    if REMOVE_DEVICE in hass.data[websocket_api.DOMAIN]:
+        message = {"type": REMOVE_DEVICE, "device_id": device.id}
+    else:
+        message = {
+            "type": REMOVE_DEVICE_LEGACY,
+            "config_entry_id": entry.entry_id,
+            "device_id": device.id,
+        }
+    await client.send_json_auto_id(message)
+    return await client.receive_json()

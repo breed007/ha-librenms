@@ -22,7 +22,6 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.setup import async_setup_component
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -39,7 +38,13 @@ from custom_components.librenms.const import (
     EVENT_ALERT,
 )
 
-from .conftest import MockLibreNMS, async_poll, get_device, setup_integration
+from .conftest import (
+    MockLibreNMS,
+    async_poll,
+    get_device,
+    remove_device,
+    setup_integration,
+)
 
 PROBLEM = "binary_sensor.librenms_problem"
 DEVICES = "sensor.librenms_devices"
@@ -431,18 +436,9 @@ async def test_deleting_the_stale_device_releases_its_alert(
     await async_poll(hass, freezer)
     assert hass.states.get(PROBLEM).attributes["alerts_critical_hidden"] == 1
 
-    # The request the Delete button on the device page sends.
-    assert await async_setup_component(hass, "config", {})
-    client = await hass_ws_client(hass)
-    device = get_device(hass, mock_config_entry, 2)
-    await client.send_json_auto_id(
-        {
-            "type": "config/device_registry/remove_config_entry",
-            "config_entry_id": mock_config_entry.entry_id,
-            "device_id": device.id,
-        }
+    response = await remove_device(
+        hass, hass_ws_client, mock_config_entry, get_device(hass, mock_config_entry, 2)
     )
-    response = await client.receive_json()
     assert response["success"], response
     assert get_device(hass, mock_config_entry, 2) is None
     await async_poll(hass, freezer)

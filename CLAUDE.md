@@ -177,6 +177,11 @@ python3 -m venv .venv
   instance reports between polls by assigning to it, use `fail(endpoint, ...)`
   and `recover(endpoint)` for per-endpoint failures, and `async_poll()` to
   advance time and run the coordinator.
+- Delete a device in tests with `remove_device()` from `tests/conftest.py`.
+  It sends `config/device_registry/remove` where registered (2026.9+) and
+  the older `remove_config_entry` otherwise; the older one logs a
+  deprecation warning on 2026.9 and goes away in 2027.9. Drop the fallback
+  when the floor passes 2026.8.
 - Sockets are blocked in tests except through the `socket_enabled` fixture,
   which `tests/test_redirects.py` uses for real servers on 127.0.0.1.
 
