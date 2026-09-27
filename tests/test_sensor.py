@@ -302,6 +302,8 @@ async def test_binary_sensors(
     assert problem.attributes["devices_down"] == 1
     assert problem.attributes["alerts_critical"] == 1
     assert problem.attributes["down_hostnames"] == ["ap-garage.lan.example"]
+    assert problem.attributes["down_devices"] == ["Garage AP"]
+    assert problem.attributes["poller_stale"] is False
 
 
 async def test_problem_clears(
@@ -407,7 +409,14 @@ async def test_poller_stale_drives_the_problem_sensor(
     await async_poll(hass, freezer, seconds=901)
 
     assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
-    assert hass.states.get("binary_sensor.librenms_problem").state == "on"
+    problem = hass.states.get("binary_sensor.librenms_problem")
+    assert problem.state == "on"
+    # Nothing else is wrong, so the attributes must name the stale poller as
+    # the reason, or the sensor is on with no explanation at all.
+    assert problem.attributes["poller_stale"] is True
+    assert problem.attributes["devices_down"] == 0
+    assert problem.attributes["alerts_critical"] == 0
+    assert problem.attributes["down_devices"] == []
 
 
 async def test_poller_stale_is_unjudged_without_poll_times(
@@ -426,3 +435,36 @@ async def test_poller_stale_is_unjudged_without_poll_times(
     stale = hass.states.get("binary_sensor.librenms_poller_stale")
     assert stale.state == "off"
     assert stale.attributes["last_advanced"] is None
+
+
+async def test_down_devices_uses_the_names_home_assistant_shows(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A fleet added by IP gets readable names; `down_hostnames` is unchanged."""
+    mock_librenms.set_devices(
+        [
+            {
+                "device_id": 1,
+                "hostname": "192.168.10.40",
+                "sysName": "navigator",
+                "display": "192.168.10.40",
+                "status": 0,
+                "icon": "linux.svg",
+            },
+            {
+                "device_id": 2,
+                "hostname": "192.168.10.10",
+                "sysName": "star",
+                "display": "Core Switch",
+                "status": 0,
+                "icon": "ubiquiti.svg",
+            },
+        ]
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    problem = hass.states.get("binary_sensor.librenms_problem")
+    assert problem.attributes["down_devices"] == ["Core Switch", "navigator"]
+    assert problem.attributes["down_hostnames"] == ["192.168.10.10", "192.168.10.40"]

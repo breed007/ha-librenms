@@ -171,7 +171,7 @@ re-add it, which would lose that history.
 | `sensor.librenms_active_alerts` | sensor | Attribute `alerts` holds the alert list (capped at 50 entries for recorder health; `truncated` says whether it was cut) |
 | `sensor.librenms_critical_alerts` | sensor | |
 | `sensor.librenms_warning_alerts` | sensor | |
-| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes include `down_hostnames` |
+| `binary_sensor.librenms_problem` | binary_sensor (`problem`) | On if any counted device is down, any critical alert is active, **or** the poller has stalled. Attributes: `devices_down`, `alerts_critical`, `alerts_warning`, `poller_stale`, `down_devices` (device names as shown in Home Assistant) and `down_hostnames` (the LibreNMS hostnames, often IP addresses) |
 | `binary_sensor.librenms_poller_stale` | binary_sensor (`problem`) | On when LibreNMS has stopped polling — see below |
 | `event.librenms_alerts` | event | Event types: `critical`, `warning`, `ok`, `recovered` |
 

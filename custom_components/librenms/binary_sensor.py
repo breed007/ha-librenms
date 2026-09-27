@@ -38,7 +38,7 @@ async def async_setup_entry(
 
 
 class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
-    """On when any monitored device is down or any critical alert is active."""
+    """On when a device is down, a critical alert is open, or polling stalled."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_translation_key = "problem"
@@ -54,18 +54,28 @@ class LibreNMSProblemBinarySensor(LibreNMSEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return a breakdown of what is currently wrong."""
+        """Return a breakdown of what is currently wrong.
+
+        Every cause that can turn the sensor on is named here, so the state
+        is never on without an attribute that says why.
+        """
         data = self.coordinator.data
+        down = [
+            device
+            for device in data.devices.values()
+            if not device.up
+            and (self.coordinator.include_disabled or not device.excluded)
+        ]
         return {
             "devices_down": data.devices_down,
             "alerts_critical": data.alerts_critical,
             "alerts_warning": data.alerts_warning,
-            "down_hostnames": sorted(
-                device.hostname
-                for device in data.devices.values()
-                if not device.up
-                and (self.coordinator.include_disabled or not device.excluded)
-            ),
+            "poller_stale": data.poller_stale,
+            # Device names as shown in Home Assistant. `down_hostnames` keeps
+            # its original contents (often IP addresses) so existing
+            # templates do not break.
+            "down_devices": sorted(device.name for device in down),
+            "down_hostnames": sorted(device.hostname for device in down),
         }
 
 
