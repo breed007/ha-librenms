@@ -51,14 +51,15 @@ Setup is a URL and an API token. No YAML.
 
 Version 0.2.0 ran against a live 22-device install of LibreNMS **26.8**. The
 changes in 0.3.0 were checked against LibreNMS's source code and this
-project's test suite, not against a live instance. The four endpoints this
-integration uses (`/api/v0/system`, `/api/v0/devices`, `/api/v0/alerts` and
-`/api/v0/resources/sensors`) have been stable across the lifetime of the v0
-API, so older releases will very likely work.
+project's test suite, not against a live instance. The integration uses four
+endpoints: `/api/v0/system`, `/api/v0/devices`, `/api/v0/alerts` and
+`/api/v0/resources/sensors`. Releases older than 26.8 have not been tested,
+and how API tokens are created and accepted changed twice in 2026 (see the
+token steps below).
 
 A hard minimum version has not been pinned. If you hit a problem on an older
 release, please open an issue with your LibreNMS version so it can be
-documented. That is the most useful thing an early user can report.
+documented.
 
 ---
 
@@ -201,9 +202,9 @@ LibreNMS REST API", but in LibreNMS's source code (checked at 26.4.0, 26.8.0
 and 26.9.1.1) it controls only the token page and its menu entry. With it, an
 account can create, rename, disable, reset and delete its own tokens. It does
 not widen what the account can read or change; the account's role decides
-what its tokens can do, with or without this permission. Removing the role in
-step 5 is still worth doing, because otherwise anyone who can sign in as
-`homeassistant` could create more tokens for it.
+what its tokens can do, with or without this permission. Remove the role in
+step 5 anyway: otherwise anyone who can sign in as `homeassistant` could create
+more tokens for it.
 
 #### As an admin (LibreNMS older than 26.4.0)
 
@@ -222,8 +223,9 @@ LibreNMS**, and enter:
 | **API token** | The token from step 2. |
 | **Verify SSL certificate** | Turn off only for self-signed certificates. |
 
-If the token is ever revoked or rotated, Home Assistant raises a repair prompt
-and asks for a new one. The URL does not need re-entering.
+If LibreNMS rejects the token, for example after it is revoked, Home Assistant
+shows a reauthentication prompt asking for a new one. The URL does not need
+re-entering.
 
 ### What the token gives access to
 
@@ -240,8 +242,8 @@ and asks for a new one. The URL does not need re-entering.
   the token as described in "Looking after the account and token" below.
 - **Use https.** Every poll sends the token to LibreNMS, and the response
   carries those credentials back. Over plain http, both cross your network
-  unencrypted. If your instance only serves http, putting it behind a reverse
-  proxy with TLS is worth doing before you connect Home Assistant to it.
+  unencrypted. If your instance only serves http, put it behind a reverse proxy
+  with TLS before you connect Home Assistant to it.
 
 ### Looking after the account and token
 
@@ -312,7 +314,7 @@ Each LibreNMS device becomes a Home Assistant device linked to the hub, with a
 |---|---|---|
 | `binary_sensor.<device>_status` | binary_sensor (`connectivity`) | Attributes: `status_reason`, `hostname`, `location`, `disabled`, `ignored` |
 | `sensor.<device>_active_alerts` | sensor | Active alerts for this device |
-| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and it only changes when the device reboots. Accurate to about one update interval |
+| `sensor.<device>_last_boot` | sensor (`timestamp`) | Boot time derived from LibreNMS uptime. Reported as a boot *timestamp* rather than a counter, and it only changes when the device reboots. Accurate to within LibreNMS's poll interval (5 minutes by default), because LibreNMS only refreshes uptime when it polls the device |
 | `sensor.<device>_hardware` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_operating_system` | sensor | Diagnostic, disabled by default |
 | `sensor.<device>_last_polled` | sensor | Diagnostic, disabled by default. The raw LibreNMS string, which has no time zone, so it is not exposed as a timestamp |
@@ -335,15 +337,14 @@ size, because LibreNMS returns every sensor in a single response.
 **Only temperature is enabled by default.** Everything else is registered but
 switched off, so enabling a class is a per-entity toggle rather than a
 setup decision. On a 22-device install this produced 62 enabled entities out
-of 90 registered, which is worth knowing before you enable more on a large
-fleet.
+of 90 registered, so enable more with care on a large fleet.
 
 Two things are handled that the raw API does not make obvious:
 
 - **Readings are not rescaled.** `sensor_current` arrives already scaled, even
   though the payload also carries `sensor_divisor` and `sensor_multiplier`.
   Applying those again puts every voltage out by a factor of 1000.
-- **Impossible readings become unavailable rather than values.** Hardware that
+- **Impossible readings are reported as unavailable.** Hardware that
   cannot read a sensor tends to return a 32-bit sentinel instead of nothing:
   real instances report temperatures of 4294704 °C while the sensor's own
   limits stay perfectly sane. Those entities go unavailable and recover on
@@ -364,16 +365,15 @@ a bare `2` could mean healthy or failed.
 ### Detecting a stalled poller
 
 If LibreNMS's poller stops, every device keeps its last known state. Nothing
-goes down, no alerts fire, and the dashboard stays green while nothing is
-actually being checked. That is the failure mode `poller_stale` exists to
+goes down and no alerts fire, so the dashboard stays green while nothing is
+being checked. That is the failure mode `poller_stale` exists to
 catch, and it is why it also drives `binary_sensor.librenms_problem`.
 
 It works by watching whether the newest `last_polled` across the fleet is
 still *advancing*, rather than comparing it against the clock. LibreNMS
 returns that field as a naive local-time string with no time zone, so an age
 comparison would need to guess the instance's zone and would be silently
-wrong if the guess were off. Progress is the thing that matters, and it can
-be checked without a clock at all.
+wrong if the guess were off. Checking for progress needs no clock at all.
 
 The sensor turns on when the newest poll time has not moved for 15 minutes,
 which is three full cycles at LibreNMS's default 300 s poll interval.
@@ -433,7 +433,8 @@ De-duplication rules:
   Home Assistant restart. The problem sensor's `alerts_critical_hidden`
   attribute counts these alerts. If a device has left the token's view for
   good, delete it from its device page in Home Assistant; its alerts then
-  stop holding the problem sensor on.
+  stop holding the problem sensor on. If that device later comes back, reload
+  the integration to restore it.
 
 ### Acknowledged alerts
 
@@ -473,8 +474,8 @@ automation:
             priority: high
 ```
 
-The two-minute `for:` guards against a single missed poll during a LibreNMS
-restart.
+The two-minute `for:` stops a device that drops for a single poll from
+sending a notification.
 
 ### Flash the lights on a critical alert
 
@@ -607,7 +608,8 @@ instance URL and the API token are never included.
 - No write operations. Acknowledging alerts, enabling or disabling devices
   and device management are all out of scope for now.
 - No per-port entities. A 50-device install with 24-port switches would create
-  over a thousand entities; port tracking is planned as an opt-in option.
+  over a thousand entities. Port tracking may come later as an option you
+  switch on.
 - No graphs. Grafana already does this well against the same data.
 - No webhook push. Alerts are discovered by polling, so worst-case detection
   latency is one update interval.
@@ -636,7 +638,7 @@ and that repository no longer accepts icons for custom integrations. On Home
 Assistant older than 2026.3 the directory is simply ignored and the default
 placeholder is shown.
 
-**The artwork is LibreNMS's, not this project's.** All eight PNGs are rendered
+The artwork belongs to LibreNMS. All eight PNGs are rendered
 from the SVGs LibreNMS publishes in
 [`librenms/librenms`](https://github.com/librenms/librenms/tree/master/html/images),
 so the integration carries their real mark:
