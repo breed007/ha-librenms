@@ -9,7 +9,6 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -22,7 +21,7 @@ from custom_components.librenms.const import (
     DOMAIN,
 )
 
-from .conftest import MockLibreNMS, async_poll, setup_integration
+from .conftest import MockLibreNMS, async_poll, get_device, setup_integration
 from .const import BASE_URL, ENTRY_DATA
 
 
@@ -49,16 +48,12 @@ async def test_hub_and_devices_registered(
 ) -> None:
     """Each LibreNMS device becomes an HA device linked to the hub."""
     await setup_integration(hass, mock_config_entry)
-    registry = dr.async_get(hass)
-
-    hub = registry.async_get_device(identifiers={(DOMAIN, mock_config_entry.entry_id)})
+    hub = get_device(hass, mock_config_entry)
     assert hub is not None
     assert hub.configuration_url == BASE_URL
     assert hub.sw_version == "25.7.0"
 
-    device = registry.async_get_device(
-        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
-    )
+    device = get_device(hass, mock_config_entry, 1)
     assert device is not None
     # `display` merely repeats the hostname here, so sysName wins.
     assert device.name == "core-sw01"
@@ -72,9 +67,7 @@ async def test_hub_and_devices_registered(
 
     # `display` wins over `sysName` for the device name, as it does in the
     # LibreNMS UI.
-    garage = registry.async_get_device(
-        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_2")}
-    )
+    garage = get_device(hass, mock_config_entry, 2)
     assert garage is not None
     assert garage.name == "Garage AP"
 
@@ -104,9 +97,7 @@ async def test_device_without_hardware_still_has_a_manufacturer(
     )
     await setup_integration(hass, mock_config_entry)
 
-    device = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
-    )
+    device = get_device(hass, mock_config_entry, 1)
     assert device is not None
     assert device.manufacturer == "Linux"
     assert device.model is None
@@ -155,13 +146,7 @@ async def test_device_name_prefers_sysname_over_a_mirrored_display(
     )
     await setup_integration(hass, mock_config_entry)
 
-    registry = dr.async_get(hass)
-    names = {
-        i: registry.async_get_device(
-            identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_{i}")}
-        ).name
-        for i in (1, 2, 3)
-    }
+    names = {i: get_device(hass, mock_config_entry, i).name for i in (1, 2, 3)}
     assert names == {1: "utopia", 2: "Core Switch", 3: "192.168.10.99"}
 
 
@@ -351,15 +336,9 @@ async def test_stale_device_can_be_removed(
 ) -> None:
     """A device deleted in LibreNMS can be removed from HA, others cannot."""
     await setup_integration(hass, mock_config_entry)
-    registry = dr.async_get(hass)
-
-    hub = registry.async_get_device(identifiers={(DOMAIN, mock_config_entry.entry_id)})
-    still_there = registry.async_get_device(
-        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_2")}
-    )
-    stale = registry.async_get_device(
-        identifiers={(DOMAIN, f"{mock_config_entry.entry_id}_1")}
-    )
+    hub = get_device(hass, mock_config_entry)
+    still_there = get_device(hass, mock_config_entry, 2)
+    stale = get_device(hass, mock_config_entry, 1)
 
     mock_librenms.set_devices(
         [d for d in mock_librenms.devices["devices"] if str(d["device_id"]) != "1"]

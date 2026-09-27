@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Run weekly even without a push, so a new Home Assistant release that
+    # breaks the integration shows up here before users report it.
+    - cron: "0 5 * * 1"
   workflow_dispatch:
 
 env:
@@ -33,11 +37,17 @@ jobs:
         # Each pytest-homeassistant-custom-component release pins exactly one
         # Home Assistant release, so the HA version is selected by pinning the
         # plugin. Check its release notes when bumping these.
+        #
+        # The last row is the declared minimum in hacs.json. Keep the two in
+        # step: raising one without the other means shipping a floor that
+        # nothing tests.
         include:
+          - homeassistant: "2026.9.4"
+            phcc: "0.13.367"
+          - homeassistant: "2026.8.3"
+            phcc: "0.13.357"
           - homeassistant: "2026.8.0"
             phcc: "0.13.354"
-          - homeassistant: "2026.7.4"
-            phcc: "0.13.348"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

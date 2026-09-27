@@ -43,7 +43,7 @@ Setup is a URL and an API token — no YAML.
 
 ## Requirements
 
-- Home Assistant **2025.8.0** or newer
+- Home Assistant **2026.8.0** or newer
 - A reachable LibreNMS instance with the API enabled
 - A LibreNMS API token
 

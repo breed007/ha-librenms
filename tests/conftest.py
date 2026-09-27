@@ -11,6 +11,7 @@ from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -140,3 +141,19 @@ async def async_poll(
     freezer.tick(timedelta(seconds=seconds))
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
+
+
+def get_device(
+    hass: HomeAssistant, entry: MockConfigEntry, device_id: int | None = None
+) -> dr.DeviceEntry | None:
+    """Return the hub device, or the device for one LibreNMS device id.
+
+    Goes through `async_get_device_by_identifier`, which is what Home
+    Assistant 2026.9 requires in tests; `async_get_device` is rejected there.
+    """
+    identifier = (
+        entry.entry_id if device_id is None else f"{entry.entry_id}_{device_id}"
+    )
+    return dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, identifier), entry.entry_id
+    )
