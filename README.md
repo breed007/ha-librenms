@@ -394,8 +394,8 @@ Two things are handled that the raw API does not make obvious:
   outside what its kind of sensor can report, or when the value the device
   sent, before LibreNMS scaled it, is at the very top of the 32-bit range.
   Frequencies are in Hz and, because CPU clocks and radio links run into the
-  gigahertz, are held only to the general limit that applies to every
-  sensor (10^12 either way). Power factor can be on a -1 to 1 or a 0 to 100
+  gigahertz, are held only to the general limit for sensor types without a
+  range of their own (10^12 either way). Power factor can be on a -1 to 1 or a 0 to 100
   scale, depending on the device, and UPS load can pass 100 percent in
   overload; both are shown as LibreNMS reports them, never rescaled. Those
   entities go unavailable and recover on their own if the reading comes
