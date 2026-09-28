@@ -426,6 +426,18 @@ returns that field as a naive local-time string with no time zone, so an age
 comparison would need to guess the instance's zone and would be silently
 wrong if the guess were off. Checking for progress needs no clock at all.
 
+LibreNMS only updates `last_polled` for a device it could reach, so if every
+device it polls is down (its own uplink failed, say), poll times stop moving
+even though the poller is running. In that case the sensor watches each
+device's `last_ping` too, which LibreNMS 26.7.0 and later update on every
+poll of a device, up or down. It does not use `last_ping` while any device
+is up: before 26.7.0 LibreNMS's separate ping service also updated it, and
+that would hide a poller that had stopped. Two gaps remain. Before 26.7.0,
+with that ping service turned on, a poller that stops while every device is
+down is not detected. With ICMP checks turned off in LibreNMS there is no
+`last_ping`, so a network where every device is down shows the poller as
+stalled.
+
 The sensor turns on when the newest poll time has not moved for 15 minutes,
 which is three full cycles at LibreNMS's default 300 s poll interval.
 Attributes report `last_advanced` and `stalled_for_seconds`. While LibreNMS

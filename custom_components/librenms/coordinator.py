@@ -135,6 +135,7 @@ class LibreNMSDevice:
     last_polled: str | None
     disabled: bool
     ignored: bool
+    last_ping: str | None = None
 
     @property
     def excluded(self) -> bool:
@@ -183,6 +184,7 @@ class LibreNMSDevice:
             last_polled=_as_str(payload.get("last_polled")),
             disabled=_as_bool(payload.get("disabled")),
             ignored=_as_bool(payload.get("ignore")),
+            last_ping=_as_str(payload.get("last_ping")),
         )
 
 
@@ -816,6 +818,26 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
             self._sensors_failing = False
             _LOGGER.info("LibreNMS health sensor data is available again")
 
+    @staticmethod
+    def _poll_marker_from(devices: dict[int, LibreNMSDevice]) -> str | None:
+        """Return the newest time LibreNMS's poller is known to have run.
+
+        That is the newest `last_polled`. LibreNMS writes it only when it
+        polls a device that is up, so when every device it polls is down,
+        poll times freeze while the poller keeps running. Only then is
+        `last_ping` used as well: from 26.7.0 LibreNMS writes it on every
+        poll of a device, up or down, plus at discovery. Before 26.7.0 its
+        separate ping service wrote it too, so trusting it while devices
+        are up would let a moving `last_ping` hide a dead poller. Disabled
+        devices are not polled and do not count toward "every device".
+        Returns None when there is nothing to judge.
+        """
+        times = [device.last_polled for device in devices.values()]
+        polled = [device for device in devices.values() if not device.disabled]
+        if polled and not any(device.up for device in polled):
+            times += [device.last_ping for device in polled]
+        return max((time for time in times if time), default=None)
+
     def _resolve_poller_health(self, data: LibreNMSData) -> None:
         """Flag a poller that has stopped making progress.
 
@@ -826,14 +848,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         but whether it is still moving, and that is answered by comparing the
         string to the one from the previous poll -- no clock, no zone, no skew.
         """
-        marker = max(
-            (
-                device.last_polled
-                for device in data.devices.values()
-                if device.last_polled
-            ),
-            default=None,
-        )
+        marker = self._poll_marker_from(data.devices)
         now = dt_util.utcnow()
 
         if marker is None:

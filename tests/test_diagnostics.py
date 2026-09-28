@@ -224,6 +224,7 @@ async def test_diagnostics_keep_useful_context(
         "version": "1.9.3",
         "uptime": 4321000,
         "last_polled": "2025-07-28 09:14:03",
+        "last_ping": None,
         "alert_count": 1,
     }
     assert diagnostics["alerts"][0] == {

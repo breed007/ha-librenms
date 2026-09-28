@@ -61,6 +61,7 @@ def _device(device: LibreNMSDevice, alert_count: int) -> dict[str, Any]:
         "version": device.version,
         "uptime": device.uptime,
         "last_polled": device.last_polled,
+        "last_ping": device.last_ping,
         "alert_count": alert_count,
     }
 

@@ -143,7 +143,17 @@ same filtering LibreNMS does.**
   in real time.
 - **`uptime` of 0** means LibreNMS could not read it.
 - **`last_polled`** is a naive local-time string with no zone. The stale-poller
-  check compares it with the previous poll's value instead of the clock.
+  check compares it with the previous poll's value instead of the clock
+  (inequality, not "later": a DST fall-back moves local time backward).
+  LibreNMS writes it only for a device that is up (`PollDevice::
+  recordPerformance`), so it freezes when every device is down.
+- **`last_ping`** (same format) is written in `CheckDeviceAvailability` on
+  every poll of a device, up or down, when ICMP checks are on, and saved by
+  discovery too. Before 26.7.0 `PingCheck`, the separate fast-ping service,
+  also wrote it (`FpingResponse::saveStats`; checked 26.3.0 to 26.6.1, gone
+  in 26.7.0). So the poll marker uses `last_ping` only when every
+  non-disabled device is down (`_poll_marker_from`); trusting it otherwise
+  would let the ping service hide a dead poller on older releases.
 - **`sensor_current` is already scaled.** Do not apply `sensor_divisor` or
   `sensor_multiplier` again. Unreadable sensors report a ~2^32 sentinel. Two
   checks catch it: `SENSOR_PLAUSIBLE_RANGE` per class (units from LibreNMS

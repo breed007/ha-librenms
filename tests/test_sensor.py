@@ -436,6 +436,88 @@ async def test_poller_stale_fires_when_the_marker_freezes(
     assert stale.attributes["stalled_for_seconds"] >= 900
 
 
+def _every_polled_device_down(
+    mock_librenms: MockLibreNMS, last_ping: str | None
+) -> None:
+    """Mark every device LibreNMS polls as down, as when its uplink fails.
+
+    Device 3 is disabled in the fixture, so LibreNMS does not poll it.
+    """
+    mock_librenms.set_devices(
+        [
+            d
+            if d["disabled"] in (1, "1")
+            else {**d, "status": 0, "last_ping": last_ping}
+            for d in mock_librenms.devices["devices"]
+        ]
+    )
+
+
+async def test_poller_stale_stays_off_when_every_device_is_down(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA live lab, N-3: a running poller with nothing reachable is not stale.
+
+    LibreNMS only writes `last_polled` for a device it could poll, but it
+    writes `last_ping` on every poll of a device, up or down. With every
+    device down the poll times freeze while `last_ping` keeps moving.
+    """
+    await setup_integration(hass, mock_config_entry)
+    for minute in range(1, 4):
+        _every_polled_device_down(mock_librenms, f"2025-07-28 10:0{minute}:00")
+        await async_poll(hass, freezer, seconds=601)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+    # Every device being down is still a problem, for the right reason.
+    problem = hass.states.get("binary_sensor.librenms_problem")
+    assert problem.state == "on"
+    assert problem.attributes["devices_down"] == 2
+    assert problem.attributes["poller_stale"] is False
+
+
+async def test_poller_stale_fires_when_every_device_is_down_and_pings_stop(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """With every device down, a frozen `last_ping` still means a dead poller."""
+    await setup_integration(hass, mock_config_entry)
+    _every_polled_device_down(mock_librenms, "2025-07-28 10:00:00")
+    await async_poll(hass, freezer)
+    await async_poll(hass, freezer, seconds=901)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
+
+
+async def test_pings_do_not_hide_a_stalled_poller_while_devices_are_up(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """`last_ping` is only trusted when poll times cannot move.
+
+    Before LibreNMS 26.7.0 its separate ping service also wrote
+    `last_ping`, so a moving `last_ping` on a fleet with devices up does not
+    prove the poller runs.
+    """
+    await setup_integration(hass, mock_config_entry)
+    for minute in range(1, 4):
+        mock_librenms.set_devices(
+            [
+                {**d, "last_ping": f"2025-07-28 10:0{minute}:00"}
+                for d in mock_librenms.devices["devices"]
+            ]
+        )
+        await async_poll(hass, freezer, seconds=601)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "on"
+
+
 async def test_poller_stale_clears_when_polling_resumes(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
