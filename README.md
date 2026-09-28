@@ -406,12 +406,13 @@ Two things are handled that the raw API does not make obvious:
   sent, before LibreNMS scaled it, is at the very top of the 32-bit range.
   Frequencies are in Hz and, because CPU clocks and radio links run into the
   gigahertz, are held only to the general limit for sensor types without a
-  range of their own (10^12 either way). Power factor can be on a -1 to 1 or a 0 to 100
-  scale, depending on the device, and UPS load can pass 100 percent in
-  overload; both are shown as LibreNMS reports them, never rescaled. Those
-  entities go unavailable and recover on their own if the reading comes
-  back. The integration logs a warning saying how many were affected, once
-  each time it starts, so it appears again after a reload or restart.
+  range of their own (10^12 either way). Power factor can be on a -1 to 1
+  or a 0 to 100 scale, depending on the device, and UPS load can pass 100
+  percent in overload; both are shown as LibreNMS reports them, never
+  rescaled. Those entities go unavailable and recover on their own if the
+  reading comes back. The integration logs a warning saying how many were
+  affected, once each time it starts, so it appears again after a reload or
+  restart.
 
 If the sensors request fails (a timeout, an error from LibreNMS, a role that
 cannot read sensors), only the health sensors go unavailable. Device status,
@@ -664,8 +665,9 @@ tokens before 26.9.0; create one on the token page instead. A running
 integration asks for a new token when this happens.
 
 **"LibreNMS API token lacks permission"** (a repair, or, while the
-integration is still starting, a "not allowed to read" error on its card): LibreNMS accepted the token but answered 403 for devices or alerts, so
-the token's user has a role that cannot read them. Give that user the
+integration is still starting, a "not allowed to read" error on its card):
+LibreNMS accepted the token but answered 403 for devices or alerts, so the
+token's user has a role that cannot read them. Give that user the
 **Global Read** role. The integration does not ask for a new token in this
 case, because the token is fine; it recovers by itself on the next update
 once the role is fixed.
@@ -715,11 +717,11 @@ look for entries with `device_listed: false` in the `alerts` attribute of
 `sensor.librenms_active_alerts`: those alerts are on devices that Home
 Assistant has but LibreNMS's latest device list left out, and the problem
 sensor's `hidden_alerts` names the critical ones. A device usually drops
-out of the list because the token's LibreNMS user can no longer see it, for example after a change to its role or to a device
-group. Restore that access (Global Read sees every device) and the device
-returns on the next update. If the device has left the token's view for
-good, delete it from its device page in Home Assistant, and its alerts stop
-counting.
+out of the list because the token's LibreNMS user can no longer see it, for
+example after a change to its role or to a device group. Restore that
+access (Global Read sees every device) and the device returns on the next
+update. If the device has left the token's view for good, delete it from
+its device page in Home Assistant, and its alerts stop counting.
 
 **Entities go unavailable during a LibreNMS restart**: expected. The
 coordinator retries with backoff and entities come back on the next successful

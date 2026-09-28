@@ -177,8 +177,8 @@ same filtering LibreNMS does.**
   300 because a UPS in overload reports over 100 (vertiv-dcs's 999.9
   sentinel stays out). Count is -1e12 to 1e19: counters grow past 1e12
   (tape drives), the ceiling rejects a Counter64 of all ones, and the floor
-  rejects LibreNMS's negative counter overflow. Check any new bound against LibreNMS
-  `tests/data/*.json`, which records every sensor value.
+  rejects LibreNMS's negative counter overflow. Check any new bound against
+  LibreNMS `tests/data/*.json`, which records every sensor value.
 - **`sensor_descr` repeats on one device**: a port's PoE current, power and
   voltage are all "ether1 POE". Counted per recording over LibreNMS's
   `tests/data/*.json` at 26.9.1.1 (poller section, else discovery; state
