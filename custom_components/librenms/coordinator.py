@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -15,7 +16,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .api import (
     LibreNMSAuthError,
@@ -370,45 +371,73 @@ class LibreNMSSensor:
         return 2**32 - SENSOR_WRAP_WINDOW <= sent <= 2**32
 
 
+def _name_key(name: str) -> str:
+    """Return what Home Assistant would make of a name in an entity id.
+
+    Entity ids come from a slug of the name, so "PowerSupply #1" and
+    "powerSupply 1" end up as the same id. A sign that starts a number is
+    kept: "+12V" and "-12V" are different readings whose names already
+    differ, and telling them apart further would only make them worse.
+    """
+    name = re.sub(r"(^|\s)\+(?=\d)", r"\1plus ", name)
+    name = re.sub(r"(^|\s)-(?=\d)", r"\1minus ", name)
+    return slugify(name)
+
+
+def _tell_apart(alike: list[LibreNMSSensor]) -> None:
+    """Add to the names of sensors that would otherwise look the same."""
+    by_class: dict[str, list[LibreNMSSensor]] = {}
+    for sensor in alike:
+        by_class.setdefault(sensor.sensor_class, []).append(sensor)
+    if len(by_class) > 1:
+        for sensor in alike:
+            label = SENSOR_CLASS_LABELS.get(
+                sensor.sensor_class, sensor.sensor_class.replace("_", " ")
+            )
+            sensor.name = f"{sensor.name} {label}"
+    for peers in by_class.values():
+        if len(peers) < 2:
+            continue
+        peers.sort(key=lambda sensor: sensor.sensor_id)
+        groups = [sensor.group for sensor in peers]
+        by_group = all(groups) and len(set(groups)) == len(groups)
+        for number, sensor in enumerate(peers, start=1):
+            sensor.name = f"{sensor.name} {sensor.group if by_group else number}"
+
+
 def name_sensors(sensors: list[LibreNMSSensor]) -> None:
-    """Give each of one device's health sensors a name no other one has.
+    """Give each of one device's health sensors a name no other one shares.
 
     LibreNMS often reuses a description on one device: a Synology's disk
     temperature and bad-sector count are both "Disk 1 DT01ACA300", and a
     MikroTik port's PoE current, power and voltage are all "ether1 POE".
     Home Assistant would name them alike and number their entity ids.
 
-    A description used once is left as it is. Where it repeats, the sensor
-    class is added when the classes differ, which settles most cases (940 of
-    1,465 in LibreNMS's recorded test data). Sensors still alike, same
-    description and same class, get their LibreNMS group when every one has
-    a different group, and otherwise a number in LibreNMS sensor id order.
+    Names are compared the way Home Assistant turns them into entity ids
+    (see _name_key), so descriptions that differ only in case or
+    punctuation count as the same. A description no other sensor shares is
+    left as it is. Where one is shared, the sensor class is added when the
+    classes differ, which settles most cases. Sensors still alike, same
+    class too, get their LibreNMS group when every one has a different
+    group, and otherwise a number in LibreNMS sensor id order.
+
+    A name made this way can itself match another sensor's description
+    (two "powerSupply" temperatures become "powerSupply 1", next to a
+    "PowerSupply #1" power reading), so the names are checked again until
+    none are shared. Three rounds settle every device in LibreNMS's
+    recorded test data; the limit only guards against a loop.
     """
-    by_description: dict[str, list[LibreNMSSensor]] = {}
     for sensor in sensors:
         sensor.name = sensor.description
-        by_description.setdefault(sensor.description, []).append(sensor)
-
-    for alike in by_description.values():
-        if len(alike) < 2:
-            continue
-        by_class: dict[str, list[LibreNMSSensor]] = {}
-        for sensor in alike:
-            by_class.setdefault(sensor.sensor_class, []).append(sensor)
-        if len(by_class) > 1:
-            for sensor in alike:
-                label = SENSOR_CLASS_LABELS.get(
-                    sensor.sensor_class, sensor.sensor_class.replace("_", " ")
-                )
-                sensor.name = f"{sensor.description} {label}"
-        for peers in by_class.values():
-            if len(peers) < 2:
-                continue
-            peers.sort(key=lambda sensor: sensor.sensor_id)
-            groups = [sensor.group for sensor in peers]
-            by_group = all(groups) and len(set(groups)) == len(groups)
-            for number, sensor in enumerate(peers, start=1):
-                sensor.name = f"{sensor.name} {sensor.group if by_group else number}"
+    for _ in range(3):
+        by_key: dict[str, list[LibreNMSSensor]] = {}
+        for sensor in sensors:
+            by_key.setdefault(_name_key(sensor.name), []).append(sensor)
+        shared = [alike for alike in by_key.values() if len(alike) > 1]
+        if not shared:
+            return
+        for alike in shared:
+            _tell_apart(alike)
 
 
 @dataclass(slots=True)

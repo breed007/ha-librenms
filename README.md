@@ -381,9 +381,12 @@ Each sensor is named after its LibreNMS description. LibreNMS often gives
 several sensors on one device the same description, such as a port's PoE
 current, power and voltage, all called "ether1 POE". Those get the kind of
 reading added ("ether1 POE current"), and if that still leaves two alike,
-LibreNMS's group for the sensor or a number. So a sensor's displayed name can
-change when another sensor with the same description appears on its device
-or goes away; its entity id does not.
+LibreNMS's group for the sensor or a number. Descriptions that differ only
+in capital letters or punctuation, such as "PowerSupply #1" and "powerSupply
+1", count as the same, because Home Assistant would give them the same
+entity id. So a sensor's displayed name can change when another sensor with
+the same description appears on its device or goes away; its entity id does
+not.
 
 **Only temperature is enabled by default.** Everything else is registered but
 switched off, so enabling a class is a per-entity toggle rather than a
@@ -677,24 +680,33 @@ string it carried. If that address is your LibreNMS instance, enter it as the
 URL, or use **Reconfigure** on an existing entry. The repair clears by itself
 on the first update after LibreNMS answers the API again.
 
-**A health sensor's entity id ends in `_2` or `_3`**: there are two causes.
+**An entity id ends in `_2` or `_3`**: Home Assistant adds the number when
+the id an entity would get is already taken. With this integration that
+happens in four cases.
 
-If there is a second entity with the same name that is unavailable, LibreNMS
-rediscovered the sensor under a new id, so Home Assistant sees a new sensor.
-The old entity is kept rather than deleted automatically,
-because a sensor missing from one update looks exactly like a retired one,
-and deleting it would throw away any renaming or settings you gave it. To
-tidy up, reload the integration (or restart Home Assistant), delete the old
-entity from its settings, then rename the new entity to the old entity id so
-automations and dashboards keep working.
-
-If both entities have readings, they are different sensors that share a
-description in LibreNMS. Up to 0.3.1 the integration named them alike and
-Home Assistant numbered their entity ids; from 0.3.2 each name says what it
-measures, for example "Disk 1 DT01ACA300 temperature" and "Disk 1 DT01ACA300
-count". Home Assistant keeps entity ids once they are created, so an existing
-install keeps the numbered ids and only the displayed names change. Rename
-the entity ids in Home Assistant if you want them to match.
+- **LibreNMS rediscovered a health sensor under a new id.** The older entity
+  with the same name is unavailable. It is kept rather than deleted
+  automatically, because a sensor missing from one update looks exactly like
+  a retired one, and deleting it would throw away any renaming or settings
+  you gave it. To tidy up, reload the integration (or restart Home
+  Assistant), delete the old entity from its settings, then rename the new
+  entity to the old entity id so automations and dashboards keep working.
+- **The integration was set up with version 0.3.1 or earlier, and two health
+  sensors share a description in LibreNMS.** Both have readings. Up to 0.3.1
+  they were named alike; from 0.3.2 each name says what it measures, for
+  example "Disk 1 DT01ACA300 temperature" and "Disk 1 DT01ACA300 count".
+  Home Assistant keeps entity ids once they are created, so the numbered ids
+  stay and only the displayed names change. Rename the entity ids in Home
+  Assistant if you want them to match.
+- **Two health sensors on one device have descriptions that differ only by a
+  plus or minus sign**, such as "+12.0VSupplyVoltage" and
+  "-12.0VSupplyVoltage". Their names already differ, so the integration
+  leaves them as they are, but Home Assistant drops the sign when it builds
+  the entity id.
+- **Two devices have the same name in Home Assistant**, for example two
+  LibreNMS devices with the same sysName. The second device's entities get
+  numbered ids. Renaming a device in Home Assistant offers to update its
+  entity ids as well.
 
 **The problem sensor is on, or an alert is counted, but no device in Home
 Assistant shows it**: look at the problem sensor's attributes. If

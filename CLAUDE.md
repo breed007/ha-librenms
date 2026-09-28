@@ -179,12 +179,19 @@ same filtering LibreNMS does.**
   (tape drives), the ceiling rejects a Counter64 of all ones, and the floor
   rejects LibreNMS's negative counter overflow. Check any new bound against LibreNMS
   `tests/data/*.json`, which records every sensor value.
-- **`sensor_descr` repeats on one device** (3,704 sensors across LibreNMS's
-  recorded test data): a port's PoE current, power and voltage are all
-  "ether1 POE". `name_sensors` adds the class label, then the group or a
-  number. Names only; entity ids are fixed at first registration, so
-  changing the naming rule never moves an existing entity, and unique ids
-  (`{entry_id}_{device_id}_sensor_{sensor_id}`) never depend on names.
+- **`sensor_descr` repeats on one device**: a port's PoE current, power and
+  voltage are all "ether1 POE". Counted per recording over LibreNMS's
+  `tests/data/*.json` at 26.9.1.1 (poller section, else discovery; state
+  sensors skipped): 1,454 descriptions repeat, holding 5,158 sensors.
+  `name_sensors` adds the class label, then the group or a number. It
+  compares names as Home Assistant slugs them into entity ids
+  (`_name_key`), so "PowerSupply #1" and "powerSupply 1" clash, but a
+  leading sign is kept ("+12V" and "-12V" stay as they are and still get a
+  `_2` id). It re-checks its own output, since a numbered name can match
+  another description. Names only; entity ids are fixed at first
+  registration, so changing the naming rule never moves an existing
+  entity, and unique ids (`{entry_id}_{device_id}_sensor_{sensor_id}`)
+  never depend on names.
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.
 - **The vendor** comes from the `icon` filename, not `os`.

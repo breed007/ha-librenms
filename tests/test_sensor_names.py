@@ -15,6 +15,7 @@ from typing import Any
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.librenms.const import DOMAIN
@@ -99,6 +100,59 @@ def test_same_class_duplicates_are_numbered_otherwise() -> None:
         21: "Temp temperature 1",
         22: "Temp temperature 2",
         30: "Temp voltage",
+    }
+
+
+# hpe-ilo_4: the power readings and the temperatures of the same two power
+# supplies, described with different case and punctuation.
+HPE_ILO = [
+    _row(40, "power", "PowerSupply #1"),
+    _row(41, "power", "PowerSupply #2"),
+    _row(42, "temperature", "powerSupply"),
+    _row(43, "temperature", "powerSupply"),
+]
+# cumulus_cumulus: the same fan twice, once as fanspeed and once as a
+# percent, and twice more differing only in case within one class.
+CUMULUS = [
+    _row(50, "fanspeed", "Fan1"),
+    _row(51, "percent", "fan1"),
+]
+# netscaler and saf-cfm: names that differ only by a sign are different
+# readings and keep their own names.
+SIGNED = [
+    _row(60, "voltage", "+12.0VSupplyVoltage"),
+    _row(61, "voltage", "-12.0VSupplyVoltage"),
+    _row(62, "voltage", "PSU-1 5V"),
+    _row(63, "voltage", "PSU-1 -5V"),
+]
+
+
+def test_names_that_only_differ_in_case_or_punctuation_are_told_apart() -> None:
+    """QA v0.3.2, R32-1: Home Assistant builds entity ids from a slug.
+
+    "PowerSupply #1" and "powerSupply 1" are different strings but the same
+    entity id, and "powerSupply 1" is what numbering the two identical
+    "powerSupply" temperatures produces. Both have to be told apart.
+    """
+    assert _names(HPE_ILO + CUMULUS) == {
+        40: "PowerSupply #1 power",
+        41: "PowerSupply #2 power",
+        42: "powerSupply 1 temperature",
+        43: "powerSupply 2 temperature",
+        50: "Fan1 fan speed",
+        51: "fan1 percent",
+    }
+    names = _names(HPE_ILO + CUMULUS).values()
+    assert len({slugify(name) for name in names}) == len(names)
+
+
+def test_names_that_differ_by_a_sign_are_left_alone() -> None:
+    """ "+12V" and "-12V" are different readings with different names."""
+    assert _names(SIGNED) == {
+        60: "+12.0VSupplyVoltage",
+        61: "-12.0VSupplyVoltage",
+        62: "PSU-1 5V",
+        63: "PSU-1 -5V",
     }
 
 
