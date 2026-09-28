@@ -265,6 +265,47 @@ def test_vendor_names_are_spelled_as_vendors_write_them(
     assert _vendor_from_icon(icon) == expected
 
 
+@pytest.mark.parametrize(
+    ("icon", "expected"),
+    [
+        # QA's list of names still title-cased in 0.3.1, each spelled as a
+        # LibreNMS OS definition's `text` or the vendor itself writes it.
+        ("mge.svg", "MGE"),
+        ("hds.svg", "Hitachi"),
+        ("uhp.svg", "UHP Networks"),
+        ("saf.svg", "SAF Tehnika"),
+        ("snr.svg", "SNR"),
+        ("wut.svg", "Wiesemann & Theis"),
+        ("bdt.svg", "BDT"),
+        ("bti.svg", "BTI"),
+        ("ict.svg", "ICT"),
+        ("kti.svg", "KTI"),
+        ("nti.svg", "NTI"),
+        ("gamatronicups.svg", "Gamatronic"),
+        ("marathonups.svg", "Marathon"),
+        ("bladeshelterpdu.svg", "PowerTek"),
+        ("serverscheck.svg", "ServersCheck"),
+        ("timemachines.svg", "TimeMachines"),
+        ("keeneticos.svg", "Keenetic"),
+        ("albentiaaos.svg", "Albentia"),
+        ("benuos.svg", "Benu"),
+        # Products whose OS definition names the maker.
+        ("siteboss.svg", "Asentria"),
+        ("sixnet.svg", "Red Lion"),
+        ("broadworks.svg", "Cisco"),
+        # Left alone: LibreNMS writes "Dasan NOS", so title case is its
+        # spelling; nothing names the maker of the vigintos modulator.
+        ("dasan.svg", "Dasan"),
+        ("vigintos.svg", "Vigintos"),
+    ],
+)
+def test_remaining_vendor_names_follow_librenms(icon: str, expected: str) -> None:
+    """QA live lab, R3-6: the long tail of acronyms and joined names."""
+    from custom_components.librenms.coordinator import _vendor_from_icon
+
+    assert _vendor_from_icon(icon) == expected
+
+
 async def test_manufacturer_never_feeds_an_id(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
