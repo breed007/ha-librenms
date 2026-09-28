@@ -409,7 +409,11 @@ class LibreNMSHealthSensor(LibreNMSDeviceEntity, SensorEntity):
         mapping = HEALTH_CLASSES.get(
             sensor.sensor_class if sensor else "", HealthClass()
         )
-        self._attr_name = sensor.description if sensor else f"sensor {sensor_id}"
+        # The name decides the entity id when the entity is first registered.
+        # Home Assistant keeps that id afterward, so a later rename (another
+        # sensor on the device taking the same description) changes only the
+        # friendly name.
+        self._attr_name = sensor.name if sensor else f"sensor {sensor_id}"
         self._attr_device_class = mapping.device_class
         self._attr_native_unit_of_measurement = mapping.unit
         self._attr_entity_registry_enabled_default = mapping.enabled
@@ -423,6 +427,13 @@ class LibreNMSHealthSensor(LibreNMSDeviceEntity, SensorEntity):
             if sensor.sensor_id == sensor_id:
                 return sensor
         return None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Follow the sensor's name as the device's other sensors change."""
+        if (sensor := self.sensor) is not None:
+            self._attr_name = sensor.name
+        super()._handle_coordinator_update()
 
     @property
     def sensor(self) -> LibreNMSSensor | None:

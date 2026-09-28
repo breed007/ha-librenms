@@ -46,6 +46,7 @@ from .const import (
     OPEN_ALERT_STATES,
     POLLER_STALE_AFTER,
     SENSOR_ABSURD_MAGNITUDE,
+    SENSOR_CLASS_LABELS,
     SENSOR_PLAUSIBLE_RANGE,
     SENSOR_WRAP_WINDOW,
     SEVERITY_CRITICAL,
@@ -288,6 +289,11 @@ class LibreNMSSensor:
     implausible: bool
     limit_high: float | None
     limit_low: float | None
+    # LibreNMS's grouping for the sensor ("Disks", "Ports"), if any.
+    group: str | None = None
+    # The name shown in Home Assistant. It starts as the description and is
+    # made unique per device by name_sensors.
+    name: str = ""
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> LibreNMSSensor | None:
@@ -314,15 +320,18 @@ class LibreNMSSensor:
         if value is not None and cls._is_wrapped(payload, value):
             value, implausible = None, True
 
+        description = _as_str(payload.get("sensor_descr")) or f"sensor {sensor_id}"
         return cls(
             sensor_id=sensor_id,
             device_id=device_id,
             sensor_class=sensor_class,
-            description=_as_str(payload.get("sensor_descr")) or f"sensor {sensor_id}",
+            description=description,
             value=value,
             implausible=implausible,
             limit_high=_as_float(payload.get("sensor_limit")),
             limit_low=_as_float(payload.get("sensor_limit_low")),
+            group=_as_str(payload.get("group")),
+            name=description,
         )
 
     @staticmethod
@@ -355,6 +364,47 @@ class LibreNMSSensor:
         multiplier = _as_float(payload.get("sensor_multiplier")) or 1.0
         sent = abs(reading * divisor / multiplier)
         return 2**32 - SENSOR_WRAP_WINDOW <= sent <= 2**32
+
+
+def name_sensors(sensors: list[LibreNMSSensor]) -> None:
+    """Give each of one device's health sensors a name no other one has.
+
+    LibreNMS often reuses a description on one device: a Synology's disk
+    temperature and bad-sector count are both "Disk 1 DT01ACA300", and a
+    MikroTik port's PoE current, power and voltage are all "ether1 POE".
+    Home Assistant would name them alike and number their entity ids.
+
+    A description used once is left as it is. Where it repeats, the sensor
+    class is added when the classes differ, which settles most cases (940 of
+    1,465 in LibreNMS's recorded test data). Sensors still alike, same
+    description and same class, get their LibreNMS group when every one has
+    a different group, and otherwise a number in LibreNMS sensor id order.
+    """
+    by_description: dict[str, list[LibreNMSSensor]] = {}
+    for sensor in sensors:
+        sensor.name = sensor.description
+        by_description.setdefault(sensor.description, []).append(sensor)
+
+    for alike in by_description.values():
+        if len(alike) < 2:
+            continue
+        by_class: dict[str, list[LibreNMSSensor]] = {}
+        for sensor in alike:
+            by_class.setdefault(sensor.sensor_class, []).append(sensor)
+        if len(by_class) > 1:
+            for sensor in alike:
+                label = SENSOR_CLASS_LABELS.get(
+                    sensor.sensor_class, sensor.sensor_class.replace("_", " ")
+                )
+                sensor.name = f"{sensor.description} {label}"
+        for peers in by_class.values():
+            if len(peers) < 2:
+                continue
+            peers.sort(key=lambda sensor: sensor.sensor_id)
+            groups = [sensor.group for sensor in peers]
+            by_group = all(groups) and len(set(groups)) == len(groups)
+            for number, sensor in enumerate(peers, start=1):
+                sensor.name = f"{sensor.name} {sensor.group if by_group else number}"
 
 
 @dataclass(slots=True)
@@ -568,6 +618,8 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 continue
             implausible += sensor.implausible
             sensors_by_device.setdefault(sensor.device_id, []).append(sensor)
+        for device_sensors in sensors_by_device.values():
+            name_sensors(device_sensors)
 
         if implausible and not self._warned_implausible:
             self._warned_implausible = True

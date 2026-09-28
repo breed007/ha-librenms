@@ -168,6 +168,12 @@ same filtering LibreNMS does.**
   (tape drives), the ceiling rejects a Counter64 of all ones, and the floor
   rejects LibreNMS's negative counter overflow. Check any new bound against LibreNMS
   `tests/data/*.json`, which records every sensor value.
+- **`sensor_descr` repeats on one device** (3,704 sensors across LibreNMS's
+  recorded test data): a port's PoE current, power and voltage are all
+  "ether1 POE". `name_sensors` adds the class label, then the group or a
+  number. Names only; entity ids are fixed at first registration, so
+  changing the naming rule never moves an existing entity, and unique ids
+  (`{entry_id}_{device_id}_sensor_{sensor_id}`) never depend on names.
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.
 - **The vendor** comes from the `icon` filename, not `os`.

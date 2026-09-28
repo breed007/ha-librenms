@@ -377,6 +377,12 @@ Home Assistant sensors with the matching device classes, so you can automate
 on them directly. It costs one extra API call per poll regardless of fleet
 size, because LibreNMS returns every sensor in a single response.
 
+Each sensor is named after its LibreNMS description. LibreNMS often gives
+several sensors on one device the same description, such as a port's PoE
+current, power and voltage, all called "ether1 POE". Those get the kind of
+reading added ("ether1 POE current"), and if that still leaves two alike,
+LibreNMS's group for the sensor or a number.
+
 **Only temperature is enabled by default.** Everything else is registered but
 switched off, so enabling a class is a per-entity toggle rather than a
 setup decision. On a 22-device install this produced 62 enabled entities out
@@ -653,14 +659,24 @@ string it carried. If that address is your LibreNMS instance, enter it as the
 URL, or use **Reconfigure** on an existing entry. The repair clears by itself
 on the first update after LibreNMS answers the API again.
 
-**A health sensor appears twice, once unavailable, with the new one ending in
-`_2`**: LibreNMS rediscovered the sensor under a new id, so Home Assistant sees
-a new sensor. The old entity is kept rather than deleted automatically,
+**A health sensor's entity id ends in `_2` or `_3`**: there are two causes.
+
+If there is a second entity with the same name that is unavailable, LibreNMS
+rediscovered the sensor under a new id, so Home Assistant sees a new sensor.
+The old entity is kept rather than deleted automatically,
 because a sensor missing from one update looks exactly like a retired one,
 and deleting it would throw away any renaming or settings you gave it. To
 tidy up, reload the integration (or restart Home Assistant), delete the old
 entity from its settings, then rename the new entity to the old entity id so
 automations and dashboards keep working.
+
+If both entities have readings, they are different sensors that share a
+description in LibreNMS. Up to 0.3.1 the integration named them alike and
+Home Assistant numbered their entity ids; from 0.3.2 each name says what it
+measures, for example "Disk 1 DT01ACA300 temperature" and "Disk 1 DT01ACA300
+count". Home Assistant keeps entity ids once they are created, so an existing
+install keeps the numbered ids and only the displayed names change. Rename
+the entity ids in Home Assistant if you want them to match.
 
 **The problem sensor is on, but no device is down and no critical alert is
 listed**: look at the problem sensor's attributes. If `poller_stale` is

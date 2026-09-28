@@ -376,3 +376,42 @@ VENDOR_NAMES: Final[dict[str, str]] = {
     "xkl": "XKL",
     "zte": "ZTE",
 }
+
+# Words added to a health sensor's name when another sensor on the same
+# device has the same description, for example "ether1 POE" for a port's PoE
+# current, power and voltage. LibreNMS's own short class labels
+# (lang/en/sensors.php), in sentence case as Home Assistant names are, with
+# the ones LibreNMS abbreviates oddly spelled out. A class missing here uses
+# its name with underscores as spaces.
+SENSOR_CLASS_LABELS: Final[dict[str, str]] = {
+    "airflow": "airflow",
+    "ber": "BER",
+    "bitrate": "bitrate",
+    "charge": "charge",
+    "chromatic_dispersion": "chromatic dispersion",
+    "cooling": "cooling",
+    "count": "count",
+    "current": "current",
+    "dbm": "dBm",
+    "delay": "delay",
+    "eer": "EER",
+    "fanspeed": "fan speed",
+    "frequency": "frequency",
+    "humidity": "humidity",
+    "load": "load",
+    "loss": "loss",
+    "percent": "percent",
+    "power": "power",
+    "power_consumed": "power consumed",
+    "power_factor": "power factor",
+    "pressure": "pressure",
+    "quality_factor": "quality factor",
+    "runtime": "runtime",
+    "signal": "signal",
+    "signal_loss": "signal loss",
+    "snr": "SNR",
+    "temperature": "temperature",
+    "tv_signal": "TV signal",
+    "voltage": "voltage",
+    "waterflow": "water flow",
+}
