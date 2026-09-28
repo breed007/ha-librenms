@@ -233,26 +233,26 @@ async def test_a_new_namesake_renames_without_moving_the_entity(
 ) -> None:
     """A sensor that later shares a description changes friendly names only.
 
-    The Pi's "Core" frequency exists first; LibreNMS then discovers a "Core"
-    voltage on the same device. The frequency entity keeps its id.
+    A "Core" temperature exists first; LibreNMS then discovers a "Core"
+    voltage on the same device. The temperature entity keeps its id and
+    takes the new name on that same update, with no reload in between:
+    temperature is enabled by default, so nothing here triggers one.
     """
-    core_clock = _row(102, "frequency", "Core")
-    mock_librenms.set_sensors([core_clock])
+    core_temperature = _row(102, "temperature", "Core")
+    mock_librenms.set_sensors([core_temperature])
     await setup_integration(hass, mock_config_entry)
     registry = er.async_get(hass)
     unique_id = f"{mock_config_entry.entry_id}_1_sensor_102"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id == "sensor.core_sw01_core"
-    registry.async_update_entity(entity_id, disabled_by=None)
-    await hass.config_entries.async_reload(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).attributes["friendly_name"] == ("core-sw01 Core")
 
-    mock_librenms.set_sensors([core_clock, _row(110, "voltage", "Core")])
+    mock_librenms.set_sensors([core_temperature, _row(110, "voltage", "Core")])
     await async_poll(hass, freezer)
 
     assert registry.async_get_entity_id("sensor", DOMAIN, unique_id) == entity_id
     assert hass.states.get(entity_id).attributes["friendly_name"] == (
-        "core-sw01 Core frequency"
+        "core-sw01 Core temperature"
     )
     assert (
         registry.async_get_entity_id(
