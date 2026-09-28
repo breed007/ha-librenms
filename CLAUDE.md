@@ -154,7 +154,9 @@ same filtering LibreNMS does.**
   clocks ~1.5e9, 60 GHz radios ~6.7e10, offsets negative). Power factor is
   -100 to 100 because Raritan and Sentry PDUs report 0 to 100. Load is 0 to
   300 because a UPS in overload reports over 100 (vertiv-dcs's 999.9
-  sentinel stays out). Check any new bound against LibreNMS
+  sentinel stays out). Count is -1e12 to 1e19: counters grow past 1e12
+  (tape drives), the ceiling rejects a Counter64 of all ones, and the floor
+  rejects LibreNMS's negative counter overflow. Check any new bound against LibreNMS
   `tests/data/*.json`, which records every sensor value.
 - **`display`** defaults to the hostname through a global template, so it is
   only a real name when it differs from `hostname`; otherwise use `sysName`.

@@ -273,6 +273,53 @@ def test_load_and_power_factor_sentinels_are_rejected(row: dict[str, Any]) -> No
     assert sensor.value is None
 
 
+# quantum_scalari6000 "read" counter in LibreNMS's recorded test data at
+# 26.9.1.1: megabytes reported by the drive, times 1000000.
+QUANTUM_BYTES_READ = {
+    **PI_ARM_CLOCK,
+    "sensor_class": "count",
+    "sensor_type": "quantum",
+    "sensor_descr": "10WT066689 read",
+    "sensor_current": 1164565662000000,
+    "sensor_multiplier": 1000000,
+    "sensor_limit": None,
+    "sensor_limit_low": None,
+}
+
+
+def test_large_counters_are_readings() -> None:
+    """A byte counter on a busy tape drive passes 10^12; that is real.
+
+    Counters only grow, so the general 10^12 limit threw away real ones.
+    """
+    sensor = LibreNMSSensor.from_api(QUANTUM_BYTES_READ)
+    assert sensor is not None
+    assert sensor.implausible is False
+    assert sensor.value == 1164565662000000
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        # The same drive's "written" counter after LibreNMS overflowed it.
+        {
+            **QUANTUM_BYTES_READ,
+            "sensor_descr": "10WT009925 written",
+            "sensor_current": -1392430019000000,
+        },
+        # A 64-bit counter read as all ones.
+        {**QUANTUM_BYTES_READ, "sensor_current": 18446744073709551615},
+    ],
+    ids=["negative_overflow", "counter64_all_ones"],
+)
+def test_counter_overflow_is_rejected(row: dict[str, Any]) -> None:
+    """Counters still reject overflow and all-ones values."""
+    sensor = LibreNMSSensor.from_api(row)
+    assert sensor is not None
+    assert sensor.implausible is True
+    assert sensor.value is None
+
+
 def test_converted_readings_are_left_to_the_range_check() -> None:
     """A `user_func` reading cannot be traced back to what the device sent.
 

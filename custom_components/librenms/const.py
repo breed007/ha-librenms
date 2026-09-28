@@ -110,8 +110,16 @@ IGNORED_SENSOR_CLASSES: Final = frozenset({"state"})
 #   Sentry PDUs, so it allows -100 to 100.
 # - load goes above 100 percent on a UPS in overload, so it allows up to
 #   300; vertiv-dcs's 999.9 sentinel stays out.
+# - count is a counter, not a measurement, and counters only grow: tape
+#   drives report bytes read in the 1e15 range. Its ceiling sits just below
+#   2^64, so a 64-bit counter read as all ones is still rejected, and its
+#   floor stays at -SENSOR_ABSURD_MAGNITUDE, which rejects the large
+#   negative values LibreNMS produces when it overflows a counter. RUTOS
+#   routers also file IMEI and IMSI numbers as count; those are shown as
+#   LibreNMS reports them.
 SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "charge": (0.0, 100.0),
+    "count": (-1e12, 1e19),
     "current": (-10_000.0, 10_000.0),
     "dbm": (-200.0, 50.0),
     "fanspeed": (0.0, 100_000.0),
@@ -123,8 +131,11 @@ SENSOR_PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "voltage": (-1_000.0, 1_000.0),
 }
 
-# Fallback bound for classes with no specific range, to catch the same
-# sentinel values without guessing at real-world limits.
+# Fallback bound for classes with no range of their own, to catch the same
+# sentinel values without guessing at real-world limits. Nothing in
+# LibreNMS's recorded test data at 26.9.1.1 that this bound rejects is a
+# real reading; the one class that had real values beyond it, count, now
+# has its own range.
 SENSOR_ABSURD_MAGNITUDE: Final = 1e12
 
 # A sensor whose raw SNMP value, before LibreNMS applied its divisor and
