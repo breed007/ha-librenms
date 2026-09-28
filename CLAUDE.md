@@ -55,8 +55,9 @@ do with the network (a permission cache being rebuilt, a database hiccup, a
 role change). Three rules keep that from producing false events or a false
 all-clear, and they are deliberately independent of each other:
 
-One definition decides which alerts count, and it is applied afresh on
-every update, the first after a reload included (`_devices_in_home_assistant`):
+One definition decides which alerts count, for events, the problem sensor
+and every alert count and list alike, and it is applied afresh on every
+update, the first after a reload included (`_devices_in_home_assistant`):
 **an alert counts while its device is in Home Assistant**, meaning in this
 update's device list or registered for this entry from an earlier one. It
 keeps no history of its own; the device registry is the lasting record, so
@@ -78,12 +79,20 @@ a reload changed the answer (QA round 4, R1).
    counts and is not known at its severity; `recovered` fires when LibreNMS
    stops listing a known alert that still counts. A device leaving the list
    and returning fires nothing.
-2. **The problem sensor follows open alerts that count.** An open critical
-   alert on a device that is registered but missing from the list keeps
-   `has_problem` true (`alerts_critical_hidden`, listed in the problem
-   sensor's `hidden_alerts` and, by id only, in diagnostics).
-   Counts still follow the visible devices, as the round-1 Global Read fix
-   intended.
+2. **Counts and the problem sensor follow open alerts that count.** Since
+   v0.3.2 (QA live lab V-A, Brian chose option A) the active, critical and
+   warning counts, the `alerts` list and diagnostics use the same rule as
+   events. Before that, counts followed only the listed devices, so a
+   critical page could arrive while "Critical alerts" read 0 and a hidden
+   warning showed nowhere. Each alert carries `device_listed` (false when
+   its device is registered but missing from this list). An open critical
+   alert on such a device is in `alerts_critical` and keeps `has_problem`
+   true; `alerts_critical_hidden` and `hidden_alerts` still pick those out
+   for compatibility. Per-device entities of a missing device are
+   unavailable, so instance totals can exceed the per-device sum. The
+   round-1 Global Read concern still holds: alerts on devices the token has
+   never listed are not in Home Assistant, so they stay out of every count,
+   list and event, and a narrow role cannot inflate the totals.
 3. **An unexpected empty list fails the update.** Devices are expected when
    the last published update had some, or, before the first success, when
    the device registry holds devices for the entry (so a reload or restart

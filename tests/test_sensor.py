@@ -59,6 +59,7 @@ async def test_active_alerts_attributes(
         "timestamp": "2025-07-28 09:12:00",
         "note": None,
         "acknowledged": False,
+        "device_listed": True,
     }
 
 

@@ -234,6 +234,7 @@ async def test_diagnostics_keep_useful_context(
         "severity": "critical",
         "state": 1,
         "acknowledged": False,
+        "device_listed": True,
         "timestamp": "2025-07-28 09:12:00",
     }
 
@@ -344,17 +345,21 @@ async def test_diagnostics_list_hidden_alerts_without_names(
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
     assert diagnostics["counts"]["alerts_critical_hidden"] == 1
-    assert diagnostics["hidden_alerts"] == [
-        {
-            "id": 101,
-            "device_id": 2,
-            "rule_id": 7,
-            "severity": "critical",
-            "state": 1,
-            "acknowledged": False,
-            "timestamp": "2025-07-28 09:12:00",
-        }
-    ]
+    # Counted like any alert whose device is in Home Assistant, flagged.
+    assert diagnostics["counts"]["alerts_active"] == 2
+    assert diagnostics["counts"]["alerts_critical"] == 1
+    hidden = {
+        "id": 101,
+        "device_id": 2,
+        "rule_id": 7,
+        "severity": "critical",
+        "state": 1,
+        "acknowledged": False,
+        "device_listed": False,
+        "timestamp": "2025-07-28 09:12:00",
+    }
+    assert diagnostics["hidden_alerts"] == [hidden]
+    assert hidden in diagnostics["alerts"]
     serialized = _serialize(diagnostics)
     leaked = [value for value in _sensitive_values() if value in serialized]
     assert leaked == []

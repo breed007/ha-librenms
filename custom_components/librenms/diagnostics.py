@@ -79,6 +79,7 @@ def _alert(alert: LibreNMSAlert) -> dict[str, Any]:
         "severity": alert.severity,
         "state": alert.state,
         "acknowledged": alert.acknowledged,
+        "device_listed": alert.device_listed,
         "timestamp": alert.timestamp,
     }
 

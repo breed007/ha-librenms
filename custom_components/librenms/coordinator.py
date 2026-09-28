@@ -204,6 +204,9 @@ class LibreNMSAlert:
     timestamp: str | None
     note: str | None
     state: int | None = None
+    # False when the alert's device is in Home Assistant but missing from
+    # LibreNMS's latest device list. Set by the coordinator.
+    device_listed: bool = True
 
     @property
     def acknowledged(self) -> bool:
@@ -252,6 +255,7 @@ class LibreNMSAlert:
             "timestamp": self.timestamp,
             "note": self.note,
             "acknowledged": self.acknowledged,
+            "device_listed": self.device_listed,
         }
 
 
@@ -580,34 +584,36 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 len(devices),
             )
 
+        in_home_assistant = self._devices_in_home_assistant(devices)
         open_alerts: list[LibreNMSAlert] = []
         alerts: list[LibreNMSAlert] = []
         alerts_by_device: dict[int, list[LibreNMSAlert]] = {}
-        hidden_alerts = 0
+        never_listed = 0
         for payload in raw_alerts:
             alert = LibreNMSAlert.from_api(payload)
             if alert is None:
                 continue
             open_alerts.append(alert)
-            # /devices only lists what the token's user may see, but /alerts
-            # applies no per-device permission check at all. Keep the counts
-            # consistent with the visible devices, or the totals would count
-            # alerts on devices no entity can show. Events and the problem
-            # sensor are worked out from open_alerts instead; see
-            # _resolve_alert_deltas.
-            if alert.device_id not in devices:
-                hidden_alerts += 1
+            # Counts follow the same rule as events: an alert counts while
+            # its device is in Home Assistant, even if this device list left
+            # it out. /alerts applies no per-device permission check, so
+            # alerts on devices the token has never listed stay out of
+            # everything, or a narrow role would count faults on devices no
+            # entity can show.
+            if alert.device_id not in in_home_assistant:
+                never_listed += 1
                 continue
+            alert.device_listed = alert.device_id in devices
             alerts.append(alert)
             alerts_by_device.setdefault(alert.device_id, []).append(alert)
 
-        if hidden_alerts and not self._warned_hidden_alerts:
+        if never_listed and not self._warned_hidden_alerts:
             self._warned_hidden_alerts = True
             _LOGGER.warning(
-                "Leaving %s LibreNMS alert(s) on devices this API token cannot "
-                "see out of the alert counts. If devices are missing, give the "
-                "token's LibreNMS user the Global Read role",
-                hidden_alerts,
+                "Leaving %s LibreNMS alert(s) on devices this API token has "
+                "never listed out of the alert counts. If devices are missing, "
+                "give the token's LibreNMS user the Global Read role",
+                never_listed,
             )
 
         sensors_by_device: dict[int, list[LibreNMSSensor]] = {}
@@ -665,7 +671,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         )
 
         self._resolve_poller_health(data)
-        self._resolve_alert_deltas(data, open_alerts)
+        self._resolve_alert_deltas(data, open_alerts, in_home_assistant)
         return data
 
     @property
@@ -736,7 +742,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         for listener in list(self._device_removed_listeners):
             listener(device_id)
 
-    def _devices_in_home_assistant(self, data: LibreNMSData) -> dict[int, str | None]:
+    def _devices_in_home_assistant(
+        self, devices: dict[int, LibreNMSDevice]
+    ) -> dict[int, str | None]:
         """Return the devices whose alerts count, for this update, by name.
 
         That is every device in this update's list, plus every device
@@ -754,7 +762,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         a device that left the token's view for good from counting.
         """
         return {
-            **{device_id: device.name for device_id, device in data.devices.items()},
+            **{device_id: device.name for device_id, device in devices.items()},
             **self._registered_devices(),
         }
 
@@ -954,7 +962,10 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         data.poller_stale = data.poller_stalled_for > POLLER_STALE_AFTER
 
     def _resolve_alert_deltas(
-        self, data: LibreNMSData, open_alerts: list[LibreNMSAlert]
+        self,
+        data: LibreNMSData,
+        open_alerts: list[LibreNMSAlert],
+        in_home_assistant: dict[int, str | None],
     ) -> None:
         """Populate new/recovered alerts and fire bus events for each.
 
@@ -969,8 +980,9 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         critical one holds the problem sensor on.
         """
         current = {alert.alert_id: alert for alert in open_alerts}
-        visible = {alert.alert_id for alert in data.alerts}
-        in_home_assistant = self._devices_in_home_assistant(data)
+        visible = {
+            alert.alert_id for alert in open_alerts if alert.device_id in data.devices
+        }
 
         if not self._primed:
             # Seed on the first successful poll so a Home Assistant restart

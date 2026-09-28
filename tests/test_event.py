@@ -383,8 +383,9 @@ async def test_device_leaving_and_returning_fires_nothing(
         [d for d in good["devices"] if str(d["device_id"]) != "2"]
     )
     await async_poll(hass, freezer)
-    # While hidden, the alert drops out of the counts like any hidden alert.
-    assert hass.states.get("sensor.librenms_critical_alerts").state == "0"
+    # While hidden, the alert is still counted: its device is still in
+    # Home Assistant.
+    assert hass.states.get("sensor.librenms_critical_alerts").state == "1"
 
     mock_librenms.devices = good
     await async_poll(hass, freezer)

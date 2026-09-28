@@ -206,7 +206,8 @@ async def test_accepted_empty_list_keeps_open_alerts_a_problem(
     assert hass.states.get(DEVICES).state == "0"
     state = hass.states.get(PROBLEM)
     assert state.state == "on"
-    assert state.attributes["alerts_critical"] == 0
+    # Its device is still in Home Assistant, so it is still counted.
+    assert state.attributes["alerts_critical"] == 1
     assert state.attributes["alerts_critical_hidden"] == 1
     assert "off" not in problem
     assert _fired(events) == []
