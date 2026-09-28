@@ -381,7 +381,9 @@ Each sensor is named after its LibreNMS description. LibreNMS often gives
 several sensors on one device the same description, such as a port's PoE
 current, power and voltage, all called "ether1 POE". Those get the kind of
 reading added ("ether1 POE current"), and if that still leaves two alike,
-LibreNMS's group for the sensor or a number.
+LibreNMS's group for the sensor or a number. So a sensor's displayed name can
+change when another sensor with the same description appears on its device
+or goes away; its entity id does not.
 
 **Only temperature is enabled by default.** Everything else is registered but
 switched off, so enabling a class is a per-entity toggle rather than a

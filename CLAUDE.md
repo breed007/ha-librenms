@@ -162,7 +162,9 @@ same filtering LibreNMS does.**
   also wrote it (`FpingResponse::saveStats`; checked 26.3.0 to 26.6.1, gone
   in 26.7.0). So the poll marker uses `last_ping` only when every
   non-disabled device is down (`_poll_marker_from`); trusting it otherwise
-  would let the ping service hide a dead poller on older releases.
+  would let the ping service hide a dead poller on older releases. Known
+  gap, accepted by Brian for v0.3.2: before 26.7.0 with the ping service
+  on, a poller that stops while every device is down is not detected.
 - **`sensor_current` is already scaled.** Do not apply `sensor_divisor` or
   `sensor_multiplier` again. Unreadable sensors report a ~2^32 sentinel. Two
   checks catch it: `SENSOR_PLAUSIBLE_RANGE` per class (units from LibreNMS
