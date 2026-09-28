@@ -479,6 +479,35 @@ async def test_poller_stale_stays_off_when_every_device_is_down(
     assert problem.attributes["poller_stale"] is False
 
 
+async def test_disabled_device_left_up_does_not_block_the_ping_fallback(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """LibreNMS does not poll a disabled device, so its status goes stale.
+
+    A device disabled while it was up keeps reporting up. It must not count
+    as a polled device that is up, or every enabled device being down would
+    fall back to `last_polled` alone and report a false stall (QA v0.3.2,
+    R32-4).
+    """
+    await setup_integration(hass, mock_config_entry)
+    for minute in range(1, 4):
+        ping = f"2025-07-28 10:0{minute}:00"
+        mock_librenms.set_devices(
+            [
+                {**d, "status": 1}
+                if d["disabled"] in (1, "1")
+                else {**d, "status": 0, "last_ping": ping}
+                for d in mock_librenms.devices["devices"]
+            ]
+        )
+        await async_poll(hass, freezer, seconds=601)
+
+    assert hass.states.get("binary_sensor.librenms_poller_stale").state == "off"
+
+
 async def test_poller_stale_fires_when_every_device_is_down_and_pings_stop(
     hass: HomeAssistant,
     mock_librenms: MockLibreNMS,
