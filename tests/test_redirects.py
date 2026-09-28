@@ -8,10 +8,11 @@ from typing import Any
 from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestServer
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -266,3 +267,83 @@ async def test_redirect_while_running_is_a_connection_failure(
     assert "redirected to https://sso.example.com/login" in caplog.text
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert not [f for f in flows if f["context"]["source"] == SOURCE_REAUTH]
+
+
+def _redirect_issue(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"redirected_{entry.entry_id}")
+
+
+async def test_redirect_while_running_raises_a_repair(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """QA live lab, N-9: say why the entities went unavailable, and where to.
+
+    The target is shown the way the config flow shows it: no user name,
+    password, query or fragment from the Location header.
+    """
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail(
+        "devices",
+        status=302,
+        text="",
+        headers={"Location": "https://admin:s3cret@sso.example.com/login?t=abc"},
+    )
+
+    await async_poll(hass, freezer)
+
+    issue = _redirect_issue(hass, mock_config_entry)
+    assert issue is not None
+    assert issue.translation_key == "redirected"
+    assert issue.translation_placeholders == {
+        "url": BASE_URL,
+        "redirect_url": "https://sso.example.com/login",
+    }
+
+    mock_librenms.recover("devices")
+    await async_poll(hass, freezer)
+
+    assert _redirect_issue(hass, mock_config_entry) is None
+    assert hass.states.get("binary_sensor.core_sw01_status").state == "on"
+
+
+async def test_redirect_repair_goes_with_the_entry(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An unloaded entry is not polling, so it has no redirect to report."""
+    await setup_integration(hass, mock_config_entry)
+    mock_librenms.fail(
+        "alerts", status=301, text="", headers={"Location": "https://nms.example.com/"}
+    )
+    await async_poll(hass, freezer)
+    assert _redirect_issue(hass, mock_config_entry) is not None
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _redirect_issue(hass, mock_config_entry) is None
+
+
+async def test_redirect_during_setup_raises_no_repair(
+    hass: HomeAssistant,
+    mock_librenms: MockLibreNMS,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """During setup the error shows on the integration card instead.
+
+    A repair raised then could not be cleaned up if the user disabled the
+    entry, because Home Assistant does not unload an entry that never
+    loaded. The same rule as the permission repair.
+    """
+    mock_librenms.fail(
+        "devices", status=302, text="", headers={"Location": "https://sso.example.com/"}
+    )
+    await setup_integration(hass, mock_config_entry)
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert _redirect_issue(hass, mock_config_entry) is None

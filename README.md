@@ -643,11 +643,15 @@ the token's user has a role that cannot read them. Give that user the
 case, because the token is fine; it recovers by itself on the next update
 once the role is fixed.
 
-**"LibreNMS answered with a redirect"**: the URL you entered redirects
-somewhere else, most often from http to https or to a login page. The
-integration never follows redirects, because the API token would go along to
-whatever address the redirect names. If the address shown is your LibreNMS
-instance, enter that as the URL (or use **Reconfigure** on an existing entry).
+**"LibreNMS answered with a redirect"** (while setting up) or **"LibreNMS is
+redirecting requests"** (a repair, once the integration is running): the
+LibreNMS address redirects somewhere else, most often from http to https or
+to a login page. The integration never follows redirects, because the API
+token would go along to whatever address the redirect names. Both messages
+show where the redirect points, without any user name, password or query
+string it carried. If that address is your LibreNMS instance, enter it as the
+URL, or use **Reconfigure** on an existing entry. The repair clears by itself
+on the first update after LibreNMS answers the API again.
 
 **A health sensor appears twice, once unavailable, with the new one ending in
 `_2`**: LibreNMS rediscovered the sensor under a new id, so Home Assistant sees

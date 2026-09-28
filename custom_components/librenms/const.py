@@ -29,6 +29,10 @@ REQUEST_TIMEOUT: Final = 15
 # alerts.
 ISSUE_INSUFFICIENT_PERMISSIONS: Final = "insufficient_permissions"
 
+# Repair issue raised when a running entry's LibreNMS address starts
+# answering with a redirect.
+ISSUE_REDIRECTED: Final = "redirected"
+
 # Bus event fired for every newly seen / recovered alert.
 EVENT_ALERT: Final = "librenms_alert"
 

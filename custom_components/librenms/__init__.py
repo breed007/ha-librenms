@@ -8,7 +8,12 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 
-from .const import DOMAIN, EMPTY_DEVICE_POLLS, ISSUE_INSUFFICIENT_PERMISSIONS
+from .const import (
+    DOMAIN,
+    EMPTY_DEVICE_POLLS,
+    ISSUE_INSUFFICIENT_PERMISSIONS,
+    ISSUE_REDIRECTED,
+)
 from .coordinator import LibreNMSConfigEntry, LibreNMSDataUpdateCoordinator
 
 PLATFORMS: list[Platform] = [
@@ -46,27 +51,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> 
 async def async_unload_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> bool:
     """Unload a config entry.
 
-    The permission repair goes with it: a disabled or unloaded entry is not
-    polling, so it has nothing to report. A reload raises it again on the
-    next update if the role is still wrong.
+    The permission and redirect repairs go with it: a disabled or unloaded
+    entry is not polling, so it has nothing to report. A reload raises them
+    again on the next update if the problem is still there.
     """
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        _delete_permission_issue(hass, entry)
+        _delete_issues(hass, entry)
     return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
     """Drop anything a removed entry left behind."""
-    _delete_permission_issue(hass, entry)
+    _delete_issues(hass, entry)
     hass.data.get(DOMAIN, {}).get(EMPTY_DEVICE_POLLS, {}).pop(entry.entry_id, None)
 
 
-def _delete_permission_issue(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
-    """Remove the entry's insufficient-permissions repair, if raised."""
-    ir.async_delete_issue(
-        hass, DOMAIN, f"{ISSUE_INSUFFICIENT_PERMISSIONS}_{entry.entry_id}"
-    )
+def _delete_issues(hass: HomeAssistant, entry: LibreNMSConfigEntry) -> None:
+    """Remove the entry's permission and redirect repairs, if raised."""
+    for issue in (ISSUE_INSUFFICIENT_PERMISSIONS, ISSUE_REDIRECTED):
+        ir.async_delete_issue(hass, DOMAIN, f"{issue}_{entry.entry_id}")
 
 
 async def async_remove_config_entry_device(

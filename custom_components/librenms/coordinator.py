@@ -22,6 +22,7 @@ from .api import (
     LibreNMSClient,
     LibreNMSError,
     LibreNMSPermissionError,
+    LibreNMSRedirectError,
 )
 from .const import (
     ALERT_STATE_ACKNOWLEDGED,
@@ -40,6 +41,7 @@ from .const import (
     EVENT_TYPE_RECOVERED,
     IGNORED_SENSOR_CLASSES,
     ISSUE_INSUFFICIENT_PERMISSIONS,
+    ISSUE_REDIRECTED,
     LARGE_INSTALL_DEVICE_COUNT,
     OPEN_ALERT_STATES,
     POLLER_STALE_AFTER,
@@ -511,6 +513,7 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 self._raise_update_error(result)
         self._check_empty_device_list(raw_devices)
         ir.async_delete_issue(self.hass, DOMAIN, self._permission_issue_id)
+        ir.async_delete_issue(self.hass, DOMAIN, self._redirect_issue_id)
         self._note_sensor_availability()
 
         devices: dict[int, LibreNMSDevice] = {}
@@ -751,6 +754,11 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
         """Return the repair issue id for this entry's permission problem."""
         return f"{ISSUE_INSUFFICIENT_PERMISSIONS}_{self.config_entry.entry_id}"
 
+    @property
+    def _redirect_issue_id(self) -> str:
+        """Return the repair issue id for this entry's redirect problem."""
+        return f"{ISSUE_REDIRECTED}_{self.config_entry.entry_id}"
+
     def _raise_update_error(self, err: BaseException) -> None:
         """Translate a failed core request into the right coordinator error.
 
@@ -777,6 +785,25 @@ class LibreNMSDataUpdateCoordinator(DataUpdateCoordinator[LibreNMSData]):
                 translation_key=ISSUE_INSUFFICIENT_PERMISSIONS,
                 translation_placeholders={"url": self.client.base_url},
             )
+            raise UpdateFailed(str(err)) from err
+        if isinstance(err, LibreNMSRedirectError):
+            # Entities going unavailable with only a log line leaves the user
+            # guessing. The repair says where LibreNMS now sends requests;
+            # err.location already has any credentials stripped. Raised only
+            # once loaded, for the same reason as the permission repair.
+            if self.config_entry.state is ConfigEntryState.LOADED:
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    self._redirect_issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key=ISSUE_REDIRECTED,
+                    translation_placeholders={
+                        "url": self.client.base_url,
+                        "redirect_url": err.location,
+                    },
+                )
             raise UpdateFailed(str(err)) from err
         if isinstance(err, LibreNMSError):
             raise UpdateFailed(str(err)) from err

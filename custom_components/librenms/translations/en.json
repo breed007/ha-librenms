@@ -138,6 +138,10 @@
     "insufficient_permissions": {
       "title": "LibreNMS API token lacks permission",
       "description": "LibreNMS at {url} accepted the API token but refused to return devices or alerts (HTTP 403). The user the token belongs to needs the Global Read role. Change it in LibreNMS on the Manage Users page. The integration recovers on its own at the next update; there is no need to enter a new token."
+    },
+    "redirected": {
+      "title": "LibreNMS is redirecting requests",
+      "description": "LibreNMS at {url} answered with a redirect to {redirect_url} instead of the API, so the integration cannot update. The integration never follows redirects, so the API token is not sent there. If your LibreNMS instance has moved to that address, use Reconfigure on the LibreNMS integration to change its URL. If it points to a sign-in page or another site, check the web server or proxy in front of LibreNMS. This repair clears on its own once LibreNMS answers the API again."
     }
   }
 }
